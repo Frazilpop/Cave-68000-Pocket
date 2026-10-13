@@ -87,7 +87,10 @@ module SpriteProcessor(
   wire [6:0]  fifoCount;
 
   wire        blitterConfigReady;
-  wire        blitterConfigValid = stateReg == STATE_READY;
+  // the blitter takes the sprite from READY's second clock, when the offset
+  // and the far edge (worked out on its first) are in
+  reg         readyArmed;
+  wire        blitterConfigValid = (stateReg == STATE_READY) & readyArmed;
   wire        blitterPixelDataReady;
   wire        blitterPixelDataValid;
   wire        blitterBusy;
@@ -142,8 +145,10 @@ module SpriteProcessor(
   // The blitter then puts the k-th pixel from the start at start + k * zoom
   // / 256. Wrapped to ten bits, as the 013's positions are. The start is
   // the position plus an offset that depends on the size and zoom alone,
-  // taken in three steps: the zoomed sizes multiplied at LATCH, the offset
-  // at CHECK, the sum as the blitter takes the sprite.
+  // taken in three steps: the zoomed sizes multiplied at CHECK (from the
+  // fields latched at LATCH: on the Pocket's part the multiply straight off
+  // the sprite RAM's output missed 96 MHz), the offset on READY's first
+  // clock, the sum as the blitter takes the sprite from READY's second.
   function automatic [17:0] zoomOffset(
     input [11:0] size,
     input [15:0] zoom,
@@ -173,6 +178,10 @@ module SpriteProcessor(
   reg  [27:0] spriteZoomedHeight;
   reg  [17:0] spriteOffsetX;
   reg  [17:0] spriteOffsetY;
+  // the far edge's place, (size - 1) * zoom, for the blitter's running sums:
+  // the zoomed size less one zoom, taken at CHECK
+  reg  [27:0] spriteFarX;
+  reg  [27:0] spriteFarY;
   wire [17:0] spriteStartX = 18'(spriteReg_pos_x + spriteOffsetX);
   wire [17:0] spriteStartY = 18'(spriteReg_pos_y + spriteOffsetY);
   wire [17:0] blitterPosX = io_ctrl_pwrinst2 ? spriteReg_pos_x : {spriteStartX[17:8], 8'h00};
@@ -251,7 +260,7 @@ module SpriteProcessor(
       STATE_CHECK:
         nextState = pwrinst2ClockStop ? STATE_DONE : (spriteDrawable ? STATE_READY : STATE_NEXT);
       STATE_READY:
-        nextState = blitterConfigReady ? STATE_PENDING : STATE_READY;
+        nextState = (blitterConfigReady & readyArmed) ? STATE_PENDING : STATE_READY;
       STATE_PENDING:
         nextState = (effectiveRead & tileCounterWrap) ? STATE_NEXT : STATE_PENDING;
       STATE_NEXT:
@@ -382,14 +391,20 @@ module SpriteProcessor(
       spriteReg_rows <= {3'h0, latchRows};
       spriteReg_zoom_x <= latchZoomX;
       spriteReg_zoom_y <= latchZoomY;
-      spriteZoomedWidth <= 28'({19'h0, latchCols, 4'h0} * {12'h0, latchZoomX});
-      spriteZoomedHeight <= 28'({19'h0, latchRows, 4'h0} * {12'h0, latchZoomY});
     end
 
     if (stateReg == STATE_CHECK)
       numTilesReg <= spriteTileCount;
 
     if (stateReg == STATE_CHECK) begin
+      spriteZoomedWidth <= 28'({16'h0, spriteWidth} * {12'h0, spriteReg_zoom_x});
+      spriteZoomedHeight <= 28'({16'h0, spriteHeight} * {12'h0, spriteReg_zoom_y});
+    end
+
+    readyArmed <= stateReg == STATE_READY;
+    if (stateReg == STATE_READY & ~readyArmed) begin
+      spriteFarX <= 28'(spriteZoomedWidth - {12'h0, spriteReg_zoom_x});
+      spriteFarY <= 28'(spriteZoomedHeight - {12'h0, spriteReg_zoom_y});
       spriteOffsetX <= zoomOffset(spriteWidth, spriteReg_zoom_x, spriteZoomedWidth,
                                   spriteReg_hFlip, io_ctrl_regs_fixed);
       spriteOffsetY <= zoomOffset(spriteHeight, spriteReg_zoom_y, spriteZoomedHeight,
@@ -452,6 +467,8 @@ module SpriteProcessor(
     .io_config_bits_sprite_rows      (spriteReg_rows),
     .io_config_bits_sprite_zoom_x    (spriteReg_zoom_x),
     .io_config_bits_sprite_zoom_y    (spriteReg_zoom_y),
+    .io_config_bits_sprite_far_x     (spriteFarX),
+    .io_config_bits_sprite_far_y     (spriteFarY),
     .io_config_bits_hFlip            (io_ctrl_regs_hFlip),
     .io_video_regs_size_x            (io_video_regs_size_x),
     .io_video_regs_size_y            (io_video_regs_size_y),

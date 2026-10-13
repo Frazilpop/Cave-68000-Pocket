@@ -77,16 +77,20 @@ module cave68000 (
   output wire [7:0]  spr_burst_len,
   input  wire        spr_burst_done,
 
-  // Sprite frame buffer: the blitter's masked 64-bit writes, the scan-out's
-  // line reads and the clear, as upstream queued them for DDR
-  output wire        fb_rd,
+  // Sprite frame buffer, as upstream queued it for DDR: the scan-out's line
+  // reads (16-beat bursts) on a port of their own, and the clear and the
+  // blitter's masked 64-bit writes on the other
+  output wire        fbr_rd,
+  output wire [31:0] fbr_addr,
+  input  wire [63:0] fbr_dout,
+  input  wire        fbr_wait_n,
+  input  wire        fbr_valid,
+  input  wire        fbr_burst_done,
   output wire        fb_wr,
   output wire [31:0] fb_addr,
   output wire [7:0]  fb_mask,
   output wire [63:0] fb_din,
-  input  wire [63:0] fb_dout,
   input  wire        fb_wait_n,
-  input  wire        fb_valid,
   output wire [7:0]  fb_burst_len,
   input  wire        fb_burst_done,
 
@@ -109,7 +113,11 @@ module cave68000 (
   // that came late
   output wire [15:0] snd,
   output wire        snd_sample,
-  output wire        snd_overrun
+  output wire        snd_overrun,
+
+  // Diagnostics, on clk_cpu: the sprite frame buffer's page swap (the 68000
+  // asking for the next frame of sprites)
+  output wire        spr_swap
 );
 
   // ------------------------------------------------------------- the game
@@ -552,7 +560,8 @@ module cave68000 (
     .IN_DATA_WIDTH  (8),
     .OUT_ADDR_WIDTH (25),
     .INDEX_WIDTH    (2),
-    .TAG_WIDTH      (21)
+    .TAG_WIDTH      (21),
+    .RAMSTYLE       ("MLAB")
   ) soundRomCache (
     .clock         (clk),
     .reset         (rst),
@@ -805,7 +814,8 @@ module cave68000 (
   );
 
   CaveReadCache #(
-    .IN_ADDR_WIDTH (32), .IN_DATA_WIDTH (64), .OUT_ADDR_WIDTH (25), .INDEX_WIDTH (3), .TAG_WIDTH (27)
+    .IN_ADDR_WIDTH (32), .IN_DATA_WIDTH (64), .OUT_ADDR_WIDTH (25), .INDEX_WIDTH (3), .TAG_WIDTH (27),
+    .RAMSTYLE ("MLAB")
   ) layerRomCache_0 (
     .clock (clk), .reset (rst), .io_enable (rom_loaded),
     .io_in_rd (_xing_0_rd), .io_in_addr (_xing_0_addr), .io_in_dout (_xing_0_dout),
@@ -814,7 +824,8 @@ module cave68000 (
     .io_out_wait_n (tile_wait_n[0]), .io_out_valid (tile_valid[0])
   );
   CaveReadCache #(
-    .IN_ADDR_WIDTH (32), .IN_DATA_WIDTH (64), .OUT_ADDR_WIDTH (25), .INDEX_WIDTH (3), .TAG_WIDTH (27)
+    .IN_ADDR_WIDTH (32), .IN_DATA_WIDTH (64), .OUT_ADDR_WIDTH (25), .INDEX_WIDTH (3), .TAG_WIDTH (27),
+    .RAMSTYLE ("MLAB")
   ) layerRomCache_1 (
     .clock (clk), .reset (rst), .io_enable (rom_loaded),
     .io_in_rd (_xing_1_rd), .io_in_addr (_xing_1_addr), .io_in_dout (_xing_1_dout),
@@ -823,7 +834,8 @@ module cave68000 (
     .io_out_wait_n (tile_wait_n[1]), .io_out_valid (tile_valid[1])
   );
   CaveReadCache #(
-    .IN_ADDR_WIDTH (32), .IN_DATA_WIDTH (64), .OUT_ADDR_WIDTH (25), .INDEX_WIDTH (4), .TAG_WIDTH (26)
+    .IN_ADDR_WIDTH (32), .IN_DATA_WIDTH (64), .OUT_ADDR_WIDTH (25), .INDEX_WIDTH (4), .TAG_WIDTH (26),
+    .RAMSTYLE ("MLAB")
   ) layerRomCache_2 (
     .clock (clk), .reset (rst), .io_enable (rom_loaded),
     .io_in_rd (_xing_2_rd), .io_in_addr (_xing_2_addr), .io_in_dout (_xing_2_dout),
@@ -851,18 +863,23 @@ module cave68000 (
     .io_frameBuffer_addr   (_gpu_io_spriteFrameBuffer_addr),
     .io_frameBuffer_din    (_gpu_io_spriteFrameBuffer_din),
     .io_frameBuffer_wait_n (_gpu_io_spriteFrameBuffer_wait_n),
-    .io_ddr_rd             (fb_rd),
+    .io_ddrRd_rd           (fbr_rd),
+    .io_ddrRd_addr         (fbr_addr),
+    .io_ddrRd_dout         (fbr_dout),
+    .io_ddrRd_wait_n       (fbr_wait_n),
+    .io_ddrRd_valid        (fbr_valid),
+    .io_ddrRd_burstDone    (fbr_burst_done),
     .io_ddr_wr             (fb_wr),
     .io_ddr_addr           (fb_addr),
     .io_ddr_mask           (fb_mask),
     .io_ddr_din            (fb_din),
-    .io_ddr_dout           (fb_dout),
     .io_ddr_wait_n         (fb_wait_n),
-    .io_ddr_valid          (fb_valid),
     .io_ddr_burstLength    (fb_burst_len),
     .io_ddr_burstDone      (fb_burst_done),
     .io_ss_idle            ()
   );
+
+  assign spr_swap = _main_io_spriteFrameBufferSwap;
 
   // --------------------------------------------------------------- video
   assign ce_pix = _videoSys_io_video_clockEnable;

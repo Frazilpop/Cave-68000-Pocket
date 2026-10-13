@@ -1,5 +1,13 @@
 // This file is a Codex-assisted rewrite based on the original work of
 // Josh Bassett (nullobject).
+//
+// Cave 68000 for Analogue Pocket: the line DMA's reads leave on a port of
+// their own (io_ddrRd_*, 16-beat bursts) instead of sharing the arbiter with
+// the clear DMA and the request queue. On DDR the shared port cost nothing;
+// on the Pocket the two pages are two PSRAM chips, and a clear burst in
+// progress on the page being drawn held the next line's read off the page
+// on screen long enough for the beam to overtake it (sprite pixels of the
+// line before, in 8-pixel pieces). io_ddr_* now only writes.
 
 module SpriteFrameBuffer(
   input         clock,
@@ -19,14 +27,17 @@ module SpriteFrameBuffer(
   input  [16:0] io_frameBuffer_addr,
   input  [15:0] io_frameBuffer_din,
   output        io_frameBuffer_wait_n,
-  output        io_ddr_rd,
+  output        io_ddrRd_rd,
+  output [31:0] io_ddrRd_addr,
+  input  [63:0] io_ddrRd_dout,
+  input         io_ddrRd_wait_n,
+  input         io_ddrRd_valid,
+  input         io_ddrRd_burstDone,
   output        io_ddr_wr,
   output [31:0] io_ddr_addr,
   output [7:0]  io_ddr_mask,
   output [63:0] io_ddr_din,
-  input  [63:0] io_ddr_dout,
   input         io_ddr_wait_n,
-  input         io_ddr_valid,
   output [7:0]  io_ddr_burstLength,
   input         io_ddr_burstDone,
   output        io_ss_idle
@@ -196,12 +207,12 @@ module SpriteFrameBuffer(
   CaveSpriteFramebufferDdrArbiter ddrArbiter (
     .clock              (clock),
     .reset              (localReset),
-    .io_in_0_rd         (lineBufferDma_in_rd),
-    .io_in_0_addr       (ddr_lineBuffer_addr),
-    .io_in_0_dout       (lineBufferDma_in_dout),
-    .io_in_0_wait_n     (lineBufferDma_in_wait_n),
-    .io_in_0_valid      (lineBufferDma_in_valid),
-    .io_in_0_burstDone  (lineBufferDma_in_burstDone),
+    .io_in_0_rd         (1'b0),
+    .io_in_0_addr       (32'h0),
+    .io_in_0_dout       (),
+    .io_in_0_wait_n     (),
+    .io_in_0_valid      (),
+    .io_in_0_burstDone  (),
     .io_in_1_wr         (frameBufferDma_out_wr),
     .io_in_1_addr       (ddr_frameBufferClear_addr),
     .io_in_1_din        (frameBufferDma_out_din),
@@ -213,18 +224,25 @@ module SpriteFrameBuffer(
     .io_in_2_mask       (queue_out_mask),
     .io_in_2_din        (queue_out_din),
     .io_in_2_wait_n     (queue_out_wait_n),
-    .io_out_rd          (io_ddr_rd),
+    .io_out_rd          (),
     .io_out_wr          (io_ddr_wr),
     .io_out_addr        (io_ddr_addr),
     .io_out_mask        (io_ddr_mask),
     .io_out_din         (io_ddr_din),
-    .io_out_dout        (io_ddr_dout),
+    .io_out_dout        (64'h0),
     .io_out_wait_n      (io_ddr_wait_n),
-    .io_out_valid       (io_ddr_valid),
+    .io_out_valid       (1'b0),
     .io_out_burstLength (io_ddr_burstLength),
     .io_out_burstDone   (io_ddr_burstDone),
     .io_idle            (ddrArbiter_idle)
   );
+
+  assign io_ddrRd_rd                = lineBufferDma_in_rd;
+  assign io_ddrRd_addr              = ddr_lineBuffer_addr;
+  assign lineBufferDma_in_dout      = io_ddrRd_dout;
+  assign lineBufferDma_in_wait_n    = io_ddrRd_wait_n;
+  assign lineBufferDma_in_valid     = io_ddrRd_valid;
+  assign lineBufferDma_in_burstDone = io_ddrRd_burstDone;
 
   assign io_ss_idle =
     ~lineBufferDma_busy &

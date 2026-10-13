@@ -1,0 +1,36 @@
+# The board's RTL: everything cave68000_mem needs that is not part of the
+# Pocket shell — upstream's board (rtl/cave, trimmed; not Cave.sv, upstream's
+# MiSTer top, which cave68000.sv replaces), the board's top, its memory
+# adapters and the SDRAM controller. ap_core.qsf pulls it in whole.
+# Keep in step with sim/ddonpach/build.sh --pocket, which compiles the same
+# list (with fx68k's hdl/verilator/ variant and the models of rtl/arcadia).
+#
+# Paths are relative to this file (pocket/src/fpga), via $::quartus(qip_path),
+# so the list works from any project that includes it.
+
+set q $::quartus(qip_path)
+set r [file join $q ../../../rtl]
+set t [file join $q ../../../third_party]
+
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $r top/cave68000_mem.sv]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $r top/cave68000.sv]
+foreach f {cave_sdram.sv kaneko_sdram.sv cave_line_port.sv cave_spr_port.sv
+           cave_fb_rows.sv cave_eeprom_store.sv} {
+    set_global_assignment -name SYSTEMVERILOG_FILE [file join $r mem $f]
+}
+foreach f {CaveAsyncMemArbiters.sv CaveBoardProfile.sv CaveBurstBuffers.sv CaveBurstDMAs.sv CaveBurstMemArbiters.sv CaveClockEnable.sv CaveCpuResetBridge.sv CaveCpuWrappers.sv CaveDataFreezers.sv CaveDualClockFIFO.sv CaveGameConfig.sv CaveLayerProcessor.sv CaveMainSupport.sv CavePageFlippers.sv CaveReadCache.sv CaveRegisterFiles.sv CaveRequestQueues.sv CaveSinglePortRam.sv CaveSpriteHelpers.sv CaveSyncQueue.sv CaveSyncReadMem.sv CaveTileRomClockCrossing.sv CaveTrueDualPortRam.sv CaveVideoTiming.sv ChannelController.sv ColorMixer.sv EEPROM.sv GPU.sv Main.sv Sound.sv SpriteBlitter.sv SpriteDecoder.sv SpriteFrameBuffer.sv SpriteProcessor.sv VideoSys.sv YMZ280B.sv} {
+    set_global_assignment -name SYSTEMVERILOG_FILE [file join $r cave $f]
+}
+foreach f {CaveSaveStateBus.sv CaveSaveStateRamPort.sv CaveSaveStateRamWrappers.sv CaveSaveStateRegisterPort.sv CaveSaveStateWideRamPort.sv} {
+    set_global_assignment -name SYSTEMVERILOG_FILE [file join $r cave savestate $f]
+}
+foreach f {single_port_ram.sv true_dual_port_ram.sv dual_clock_fifo.sv} {
+    set_global_assignment -name SYSTEMVERILOG_FILE [file join $r arcadia $f]
+}
+
+# fx68k: hdl/ is ijor's synthesis code. Its microcode is read with
+# $readmemb("microrom.mem") relative to the project directory, so the two
+# .mem files are linked next to ap_core.qpf (pocket/src/fpga/*.mem).
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $t fx68k/hdl/fx68k.sv]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $t fx68k/hdl/fx68kAlu.sv]
+set_global_assignment -name SYSTEMVERILOG_FILE [file join $t fx68k/hdl/uaddrPla.sv]

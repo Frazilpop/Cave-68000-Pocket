@@ -3,7 +3,7 @@
 """Render MAME's dumped frames on the board, and compare them pixel for pixel.
 
     python3 tools/pocket/replay_cave_dumps.py SET DUMPDIR [frames] [--out DIR] [--png]
-                                              [--mame-budget] [-j N]
+                                              [--mame-budget] [--pocket] [-j N]
 
 For each f<NNNNN> under DUMPDIR (tools/mame_cave_dump.lua's) that recorded a
 sprite draw – or the frames listed, comma-separated – this builds the loader
@@ -18,6 +18,8 @@ and holds what the board shows against MAME:
 
 --mame-budget cuts each list where MAME's sprite budget ran out
 (cave_dump_loader.py --mame-budget), so the frames MAME cut compare too.
+--pocket runs build/obj_pocket/tb_pocket instead (sim/ddonpach/build.sh
+--pocket): the board on the Pocket's memory servants and models of the parts.
 The harness runs -j at a time (default: the cores). With --png, the pictures that differ get diff_NNNNN.png (sim | MAME |
 difference) beside them, through diff_cave_frame.py. Run from the repository
 root. Reads derived files and the image only through the harness.
@@ -51,6 +53,9 @@ def main():
             png = True
         elif a == "--mame-budget":
             budget = [a]
+        elif a == "--pocket":
+            global TB
+            TB = "build/obj_pocket/tb_pocket"
         elif a == "-j":
             jobs = int(next(it))
         else:

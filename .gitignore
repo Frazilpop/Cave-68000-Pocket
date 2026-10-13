@@ -113,3 +113,6 @@ Thumbs.db
 /pocket/fit/incremental_db
 /pocket/fit/output_files
 /pocket/fit/c5_pin_model_dump.txt
+/pocket/src/fpga/output_files
+/pocket/src/fpga/db
+/pocket/src/fpga/incremental_db
