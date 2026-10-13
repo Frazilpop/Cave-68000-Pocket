@@ -135,11 +135,13 @@ module SpriteBlitter(
   reg         lastTagValid;
   wire [18:0] pixelTag =
     lastTagValid & lastTagAddr == posReg_x[8:0] ? lastTagData : rowTagOut;
-  wire [18:0] runStartP =
-    rowFirstP & (spriteFirstP | posReg_y != prevRowY) ? rowSeqP : runStartReg;
+  // (a row that starts a run has no earlier row in it: the comparisons with
+  // the run's start run beside the test for a new one)
+  wire        newRunP = rowFirstP & (spriteFirstP | posReg_y != prevRowY);
+  wire [18:0] runStartP = newRunP ? rowSeqP : runStartReg;
   wire overdrawn =
     (hFlipP & pixelTag == rowSeqP)
-    | (vFlipP & pixelTag >= runStartP & pixelTag < rowSeqP);
+    | (vFlipP & ~newRunP & pixelTag >= runStartReg & pixelTag < rowSeqP);
   wire pixelVisible =
     posReg_x <= maxVisibleX
     & posReg_y <= maxVisibleY
