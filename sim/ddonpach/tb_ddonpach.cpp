@@ -5,6 +5,7 @@
 //          [--rom-lat N] [--spr-lat N] [--fb-lat N] [--all-frames]
 //          [--trace file] [--trace-count N] [--trace-data-only]
 //          [--prog file --replay N] [--wav file] [--ymz-log file]
+//          [--press list]
 //
 // Hosts cave68000 (through sim/ddonpach/cave68000_sim.sv, which adds the
 // region offsets and upstream's DDR burst bookkeeping) with behavioural
@@ -53,6 +54,12 @@
 // for it; '+' marks those) – so sim/ymz280b's model can play the board's
 // own run back (model_vs_mame --true-rate). stats.csv gains the most clk_cpu clocks a sample
 // took that frame (of 362.8) and the samples that came late.
+//
+// --press holds inputs down over frame ranges, as tools/mame_cave_screens.lua's
+// PRESS does and by the same MAME field names: "400-405:Coin 1,600-605:1
+// Player Start". "Pause" (the harness's own, not MAME's) holds the board's
+// pause, as the Pocket's menu does. An input pressed for frames A-B is set at the end of frame A
+// (where MAME's notifier sets it) and let go at the end of frame B + 1.
 //
 // Built with -DPOCKET_MEM (sim/ddonpach/build.sh --pocket, binary tb_pocket)
 // the harness hosts sim/ddonpach/cave68000_psim.sv instead: the board behind
@@ -105,6 +112,38 @@ int main(int argc, char** argv) {
     int replay = -1;
     const char* wav_path = nullptr;
     const char* ymz_log_path = nullptr;
+    struct Press { int from, to, port, bit; };     // port 0 p1, 1 p2, 2 coin, 3 start, 4 service, 5 pause
+    std::vector<Press> presses;
+    auto parse_presses = [&](const char* list) -> bool {
+        static const struct { const char* name; int port, bit; } fields[] = {
+            {"P1 Up", 0, 0}, {"P1 Down", 0, 1}, {"P1 Left", 0, 2}, {"P1 Right", 0, 3},
+            {"P1 Button 1", 0, 4}, {"P1 Button 2", 0, 5}, {"P1 Button 3", 0, 6},
+            {"P1 Button 4", 0, 7},
+            {"P2 Up", 1, 0}, {"P2 Down", 1, 1}, {"P2 Left", 1, 2}, {"P2 Right", 1, 3},
+            {"P2 Button 1", 1, 4}, {"P2 Button 2", 1, 5}, {"P2 Button 3", 1, 6},
+            {"P2 Button 4", 1, 7},
+            {"Coin 1", 2, 0}, {"Coin 2", 2, 1},
+            {"1 Player Start", 3, 0}, {"2 Players Start", 3, 1},
+            {"Service Mode", 4, 0},
+            {"Pause", 5, 0},                    // the Pocket's menu open; not MAME's
+        };
+        std::string s = list;
+        size_t p = 0;
+        while (p < s.size()) {
+            size_t q = s.find(',', p);
+            if (q == std::string::npos) q = s.size();
+            std::string item = s.substr(p, q - p);
+            p = q + 1;
+            int a, b, used = 0;
+            if (sscanf(item.c_str(), "%d-%d:%n", &a, &b, &used) < 2 || !used) return false;
+            std::string name = item.substr(used);
+            bool found = false;
+            for (auto& f : fields)
+                if (name == f.name) { presses.push_back({a, b, f.port, f.bit}); found = true; }
+            if (!found) { fprintf(stderr, "--press: no input called %s\n", name.c_str()); return false; }
+        }
+        return true;
+    };
     for (int i = 5; i < argc; i++) {
         if (!strcmp(argv[i], "--rom-lat") && i + 1 < argc)          rom_lat = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--spr-lat") && i + 1 < argc)     spr_lat = atoi(argv[++i]);
@@ -117,6 +156,9 @@ int main(int argc, char** argv) {
         else if (!strcmp(argv[i], "--replay") && i + 1 < argc)      replay = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--wav") && i + 1 < argc)         wav_path = argv[++i];
         else if (!strcmp(argv[i], "--ymz-log") && i + 1 < argc)     ymz_log_path = argv[++i];
+        else if (!strcmp(argv[i], "--press") && i + 1 < argc) {
+            if (!parse_presses(argv[++i])) return 2;
+        }
         else {
             std::string s = argv[i];
             size_t p = 0;
@@ -550,6 +592,15 @@ int main(int argc, char** argv) {
                 max_wait = 0; max_wait_addr = 0;
                 if (frame % 10 == 0) fprintf(stderr, "frame %d  cycles %llu\n", frame, (unsigned long long)cyc);
                 frame++;
+                // the inputs for the frame now begun, set where MAME's
+                // notifier for the one just ended sets them
+                if (!presses.empty()) {
+                    uint8_t in[6] = {0, 0, 0, 0, 0, 0};
+                    for (auto& pr : presses)
+                        if (frame - 1 >= pr.from && frame - 1 <= pr.to) in[pr.port] |= 1u << pr.bit;
+                    t->p1 = in[0]; t->p2 = in[1]; t->coin = in[2]; t->start = in[3]; t->service = in[4];
+                    if (replay < 0) t->pause = in[5];
+                }
                 y = 0; x = 0;
             }
             if (!vb && prev_vb) { y = 0; x = 0; }
