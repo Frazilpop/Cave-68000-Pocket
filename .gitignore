@@ -107,3 +107,9 @@ Thumbs.db
 # fx68k's microcode beside the fit project, linked there by pocket/fit/fit.sh
 /pocket/fit/microrom.mem
 /pocket/fit/nanorom.mem
+# Quartus's fit project leaves these beside pocket/fit/fit.qsf: symlinks into
+# build/ (the directory patterns above do not match a symlink) and a pin dump
+/pocket/fit/db
+/pocket/fit/incremental_db
+/pocket/fit/output_files
+/pocket/fit/c5_pin_model_dump.txt
