@@ -104,8 +104,12 @@ module cave68000 (
   output wire        hs, vs, hblank, vblank, de,
   output wire [7:0]  r, g, b,
 
-  // Audio, on clk_cpu
-  output wire [15:0] snd
+  // Audio, on clk_cpu: the YMZ280B's mono output, held between samples;
+  // snd_sample marks each new one (the chip's clock / 192), snd_overrun one
+  // that came late
+  output wire [15:0] snd,
+  output wire        snd_sample,
+  output wire        snd_overrun
 );
 
   // ------------------------------------------------------------- the game
@@ -180,11 +184,8 @@ module cave68000 (
   // no controller here: the buses sit idle, and the capture logic behind
   // them has no reader, so synthesis sweeps it.
   cave_ssbus_if ssMain();
-  cave_ssbus_if ssSound();
   assign ssMain.data = 64'd0;   assign ssMain.addr = 32'd0;  assign ssMain.select = 8'd0;
   assign ssMain.write = 1'b0;   assign ssMain.read = 1'b0;   assign ssMain.query = 1'b0;
-  assign ssSound.data = 64'd0;  assign ssSound.addr = 32'd0; assign ssSound.select = 8'd0;
-  assign ssSound.write = 1'b0;  assign ssSound.read = 1'b0;  assign ssSound.query = 1'b0;
 
   // ------------------------------------------------------------- the wires
   wire [15:0]  _main_io_soundCtrl_ymz_dout;
@@ -509,26 +510,24 @@ module cave68000 (
   );
 
   // -------------------------------------------------------------- Sound
-  Sound sound (
+  Sound #(.CLOCK_HZ (32000000)) sound (
     .clock                 (clk_cpu),
     .reset                 (cpuDomainReset),
+    .io_clock16m           (gameIndex == 4'd6),
     .io_ctrl_ymz_rd        (_main_io_soundCtrl_ymz_rd),
     .io_ctrl_ymz_wr        (_main_io_soundCtrl_ymz_wr),
     .io_ctrl_ymz_addr      (_main_io_soundCtrl_ymz_addr),
     .io_ctrl_ymz_din       (_main_io_soundCtrl_ymz_din),
     .io_ctrl_ymz_dout      (_main_io_soundCtrl_ymz_dout),
     .io_ctrl_irq           (_main_io_soundCtrl_irq),
-    .io_options_ymz_level  (4'd0),
     .io_rom_0_rd           (_sound_io_rom_0_rd),
     .io_rom_0_addr         (_sound_io_rom_0_addr),
     .io_rom_0_dout         (_sound_io_rom_0_dout),
     .io_rom_0_wait_n       (_sound_io_rom_0_wait_n),
     .io_rom_0_valid        (_sound_io_rom_0_valid),
     .io_audio              (snd),
-    .io_ss_hold            (1'b0),
-    .io_ss_restore_enable  (1'b0),
-    .io_ss_idle            (),
-    .io_ssbus              (ssSound)
+    .io_audio_valid        (snd_sample),
+    .io_overrun            (snd_overrun)
   );
 
   CaveSoundRomReadFreezer sound_io_rom_0_freezer (
