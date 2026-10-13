@@ -1,0 +1,77 @@
+{
+    "input": {
+        "magic": "APF_VER_1",
+        "controllers": [
+            {
+                "type": "default",
+                "mappings": [
+                    {
+                        "id": 0,
+                        "name": "Shot (B1)",
+                        "key": "pad_btn_a"
+                    },
+                    {
+                        "id": 1,
+                        "name": "Bomb (B2)",
+                        "key": "pad_btn_b"
+                    },
+                    {
+                        "id": 2,
+                        "name": "Button 3",
+                        "key": "pad_btn_x"
+                    },
+                    {
+                        "id": 3,
+                        "name": "Button 4",
+                        "key": "pad_btn_y"
+                    },
+                    {
+                        "id": 6,
+                        "name": "Start",
+                        "key": "pad_btn_start"
+                    },
+                    {
+                        "id": 7,
+                        "name": "Coin",
+                        "key": "pad_btn_select"
+                    }
+                ]
+            },
+            {
+                "type": "default",
+                "mappings": [
+                    {
+                        "id": 0,
+                        "name": "Shot (B1)",
+                        "key": "pad_btn_a"
+                    },
+                    {
+                        "id": 1,
+                        "name": "Bomb (B2)",
+                        "key": "pad_btn_b"
+                    },
+                    {
+                        "id": 2,
+                        "name": "Button 3",
+                        "key": "pad_btn_x"
+                    },
+                    {
+                        "id": 3,
+                        "name": "Button 4",
+                        "key": "pad_btn_y"
+                    },
+                    {
+                        "id": 6,
+                        "name": "Start",
+                        "key": "pad_btn_start"
+                    },
+                    {
+                        "id": 7,
+                        "name": "Coin",
+                        "key": "pad_btn_select"
+                    }
+                ]
+            }
+        ]
+    }
+}

@@ -1,0 +1,40 @@
+{
+    "data": {
+        "magic": "APF_VER_1",
+        "data_slots": [
+            {
+                "name": "Game",
+                "id": 0,
+                "required": true,
+                "parameters": "0x113",
+                "extensions": [
+                    "json"
+                ],
+                "address": "0x30000000"
+            },
+            {
+                "name": "ROM",
+                "id": 1,
+                "required": true,
+                "parameters": "0x8",
+                "extensions": [
+                    "rom"
+                ],
+                "size_maximum": "0x3500080",
+                "address": "0x00000000"
+            },
+            {
+                "name": "Save",
+                "id": 2,
+                "required": false,
+                "parameters": "0x24",
+                "nonvolatile": true,
+                "extensions": [
+                    "sav"
+                ],
+                "size_maximum": "0x80",
+                "address": "0x20000000"
+            }
+        ]
+    }
+}
