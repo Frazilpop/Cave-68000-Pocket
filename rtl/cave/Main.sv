@@ -593,16 +593,11 @@ module Main(
     .state_out      (eepromPinState)
   );
 
-  CavePauseToggle pauseToggle(
-    .clock         (clock),
-    .reset         (reset),
-    .hold          (mainRamStateEnable),
-    .state_load    (mainControlWord10Restore),
-    .state_in      (mainControlRestoreData[5:4]),
-    .pause_pressed (pausePressed),
-    .pause_active  (pauseActive),
-    .state_out     (pauseState)
-  );
+  // Pause is a level on the Pocket: the board is paused while the Pocket's
+  // own menu is open, and only then. Upstream's toggle (a MiSTer pause key)
+  // flipped on the menu's opening and stayed paused after it closed.
+  assign pauseActive = pausePressed;
+  assign pauseState  = {pausePressed, pausePressed};
   wire        mazingerVideoIrqClear = 1'b0;
   wire        mazingerUnknownIrqClear = 1'b0;
   wire        mazingerProgRomRead = 1'b0;
