@@ -4,6 +4,7 @@
 //   tb_ddonpach <set.rom> <game id> <frames> <outdir> [dump frames, comma list]
 //          [--rom-lat N] [--spr-lat N] [--fb-lat N] [--all-frames]
 //          [--trace file] [--trace-count N] [--trace-data-only]
+//          [--prog file --replay N]
 //
 // Hosts cave68000 (through sim/ddonpach/cave68000_sim.sv, which adds the
 // region offsets and upstream's DDR burst bookkeeping) with behavioural
@@ -33,6 +34,16 @@
 // (FC 7) are left out, as MAME has none on the program bus. With
 // --trace-data-only, every access to 000400-0fffff (the program) is left out,
 // as the Lua script's data-only mode does.
+//
+// --prog overlays the image's program region with a file (from 0).
+// --replay N is for tools/pocket/cave_dump_loader.py's programs, which copy
+// MAME's dump of picture N into the board and then spin at 000500: at the
+// first fetch there the harness presses pause (the 68000 halts; the sprite
+// frame buffer swaps at every vblank, so the loaded list is drawn and shown
+// each frame), lets three whole frames go by, and writes the fourth as
+// frame_N.ppm, with the sprite layer on screen in it as sprites_N.bin
+// (320 x 240 little-endian u16, priority << 14 | colour << 8 | pen, 0 =
+// transparent, as the dump's sprite_bitmap.bin). <frames> is then a limit.
 
 #include "Vcave68000_sim.h"
 #include "verilated.h"
@@ -62,6 +73,8 @@ int main(int argc, char** argv) {
     const char* trace_path = nullptr;
     long trace_count = 0;
     bool trace_data_only = false;
+    const char* prog_path = nullptr;
+    int replay = -1;
     for (int i = 5; i < argc; i++) {
         if (!strcmp(argv[i], "--rom-lat") && i + 1 < argc)          rom_lat = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--spr-lat") && i + 1 < argc)     spr_lat = atoi(argv[++i]);
@@ -70,6 +83,8 @@ int main(int argc, char** argv) {
         else if (!strcmp(argv[i], "--trace") && i + 1 < argc)       trace_path = argv[++i];
         else if (!strcmp(argv[i], "--trace-count") && i + 1 < argc) trace_count = atol(argv[++i]);
         else if (!strcmp(argv[i], "--trace-data-only"))              trace_data_only = true;
+        else if (!strcmp(argv[i], "--prog") && i + 1 < argc)        prog_path = argv[++i];
+        else if (!strcmp(argv[i], "--replay") && i + 1 < argc)      replay = atoi(argv[++i]);
         else {
             std::string s = argv[i];
             size_t p = 0;
@@ -94,6 +109,13 @@ int main(int argc, char** argv) {
         fclose(f);
     }
     rom.resize(64u << 20, 0);
+    if (prog_path) {
+        FILE* f = fopen(prog_path, "rb");
+        if (!f) { perror(prog_path); return 1; }
+        size_t n = fread(rom.data(), 1, 16u << 20, f);
+        fclose(f);
+        fprintf(stderr, "program region: %zu bytes from %s\n", n, prog_path);
+    }
     auto rom16 = [&](uint32_t byte) -> uint16_t {      // little-endian, as SDRAM holds the file
         byte &= (64u << 20) - 2;
         return (uint16_t)rom[byte] | ((uint16_t)rom[byte + 1] << 8);
@@ -178,8 +200,10 @@ int main(int argc, char** argv) {
     uint64_t as_start = 0, max_wait = 0; uint32_t max_wait_addr = 0; bool waiting = false;
     uint64_t bus_f = 0, irq_f = 0, swap_f = 0, sprb_f = 0, fbr_f = 0, fbw_f = 0;
     bool swap_prev = false;
+    int loaded_frame = -1;       // --replay: the frame the loader finished in
+    bool replay_done = false;
 
-    while (frame <= frames) {
+    while (frame <= frames && !replay_done) {
         // ---- the falling half: the board settles on this period's inputs
         half(0);
 
@@ -266,6 +290,11 @@ int main(int argc, char** argv) {
         if (cpu_rose) {
             bool as = t->dbg_as;
             if (as && !as_prev) { as_start = cyc; waiting = true; bus_f++; if (t->dbg_fc == 7) irq_f++; }
+            if (replay >= 0 && loaded_frame < 0 && as && t->dbg_rw && t->dbg_addr == 0x000500) {
+                loaded_frame = frame;
+                t->pause = 1;
+                fprintf(stderr, "loaded in frame %d\n", frame);
+            }
             if (as && t->dbg_dtack) {
                 if (waiting) {
                     uint64_t w = cyc - as_start;
@@ -306,6 +335,25 @@ int main(int argc, char** argv) {
             }
             if (vb && !prev_vb) {
                 if (trace) fprintf(trace, "# frame %d\n", frame);
+                if (replay >= 0 && loaded_frame >= 0 && frame == loaded_frame + 4) {
+                    char fn[512];
+                    snprintf(fn, sizeof fn, "%s/frame_%05d.ppm", outdir.c_str(), replay);
+                    FILE* f = fopen(fn, "wb");
+                    fprintf(f, "P6\n320 240\n255\n");
+                    fwrite(img.data(), 1, img.size(), f);
+                    fclose(f);
+                    // the page on screen this frame: rows of 512 pixels, four to a word
+                    uint32_t page = (uint32_t)t->dbg_fb_read_page << 16;
+                    std::vector<uint16_t> spr(320 * 240);
+                    for (int yy = 0; yy < 240; yy++)
+                        for (int xx = 0; xx < 320; xx++)
+                            spr[yy * 320 + xx] = (uint16_t)(fbmem[(page + yy * 128 + xx / 4) & ((1u << 18) - 1)] >> (16 * (xx % 4)));
+                    snprintf(fn, sizeof fn, "%s/sprites_%05d.bin", outdir.c_str(), replay);
+                    f = fopen(fn, "wb");
+                    fwrite(spr.data(), 2, spr.size(), f);
+                    fclose(f);
+                    replay_done = true;
+                }
                 if (all_frames || dumps.count(frame)) {
                     char fn[512];
                     snprintf(fn, sizeof fn, "%s/frame_%05d.ppm", outdir.c_str(), frame);
@@ -333,6 +381,10 @@ int main(int argc, char** argv) {
 
     if (trace) fclose(trace);
     fclose(stats);
+    if (replay >= 0 && !replay_done) {
+        fprintf(stderr, loaded_frame < 0 ? "the loader never finished\n" : "ran out of frames\n");
+        return 1;
+    }
     t->final();
     delete t;
     return 0;

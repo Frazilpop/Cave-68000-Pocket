@@ -9,7 +9,8 @@
 //   * upstream's DDR.sv burst bookkeeping in front of the sprite tile and
 //     frame buffer ports (sim_ddr_port below): burstDone with the last beat,
 //     combinationally on a write as MiSTer's bridge gave it;
-//   * the 68000's bus, taken by hierarchical reference for the trace.
+//   * the 68000's bus, taken by hierarchical reference for the trace, and
+//     the sprite frame buffer's page on screen, for --replay.
 //
 // The memories themselves are the C++ side's (tb_ddonpach.cpp).
 
@@ -125,7 +126,8 @@ module cave68000_sim (
   output wire [23:0] dbg_addr,
   output wire [15:0] dbg_din, dbg_dout,
   output wire [2:0]  dbg_ipl,
-  output wire        dbg_sprite_swap
+  output wire        dbg_sprite_swap,
+  output wire [1:0]  dbg_fb_read_page   // the sprite frame buffer page on screen
 );
   wire [31:0] off_snd, off_l0, off_l1, off_l2, off_spr;
   CaveGameConfig cfg (
@@ -202,6 +204,7 @@ module cave68000_sim (
   assign dbg_dout  = dut.main._cpu_io_dout;
   assign dbg_ipl   = dut.main._cpu_io_ipl;
   assign dbg_sprite_swap = dut._main_io_spriteFrameBufferSwap;
+  assign dbg_fb_read_page = dut.spriteFrameBuffer.pageFlipper.read_index;
 endmodule
 
 `default_nettype wire
