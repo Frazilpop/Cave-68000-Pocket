@@ -3,12 +3,17 @@
 #
 #   tools/pocket/deploy.sh [/Volumes/NAME] [--keep]   (--keep is accepted and changes nothing)
 #   tools/pocket/deploy.sh --status                   is the current build on the card?
+#   tools/pocket/deploy.sh --full                     compare every ROM image on the card byte for byte
 #
 # Copies pocket/dist ("Cores/frazilpop.Cave 68000" with the bitstream, the
 # platform JSON and image, the instance JSONs under Assets/cave68000/) onto the
 # Pocket's SD card, and each target set's build/pocket/<set>.rom (made by
 # tools/pocket/build_rom.py) to Assets/cave68000/common/. A ROM image already on
-# the card byte for byte is left alone. The card is the volume with
+# the card is left alone: build/pocket/deployed-roms.txt records, for each card
+# (its volume UUID), each image's SHA-256 and the size and time of its copy on
+# the card, and an image whose record still matches is skipped unread. One
+# without a record (a new card, a new build) is compared byte for byte, and
+# copied only if it differs. The card is the volume with
 # Analogue_Pocket.json at its root – in the Mac's reader, or the Pocket's own
 # over USB. This installs the core itself: nothing has to be on the card first.
 #
@@ -26,12 +31,13 @@ DIST="$REPO/pocket/dist"
 BIN="$DIST/Cores/$CORE/bitstream.rbf_r"
 ROMS="$REPO/build/pocket"
 RECORD="$ROMS/deployed.txt"
+ROMREC="$ROMS/deployed-roms.txt"
 SETS="ddonpach ddonpachj esprade espradej espradejo guwange guwanges feversos dfeveron uopoko uopokoj gaia theroes theroesa"      # the target sets
 [ -f "$BIN" ] || { echo "no $BIN - run pocket/build.sh first"; exit 1; }
 
-VOL="" STATUS=0
+VOL="" STATUS=0 FULL=0
 for a in "$@"; do
-	case "$a" in --keep) ;; --status) STATUS=1 ;; *) VOL="$a" ;; esac
+	case "$a" in --keep) ;; --status) STATUS=1 ;; --full) FULL=1 ;; *) VOL="$a" ;; esac
 done
 
 built() { stat -f '%Sm' -t '%Y-%m-%d %H:%M' "$BIN"; }
@@ -119,7 +125,23 @@ echo "Copied the core ($CORE), the platform and ${#roms[@]} instance JSON(s)"
 # the ROM images: only those that differ
 common="$VOL/Assets/$PLATFORM/common"
 mkdir -p "$common"
+card_id=$(diskutil info "$VOL" 2>/dev/null | sed -n 's/^ *Volume UUID: *//p' || true)
+[ -n "$card_id" ] || card_id=$(basename "$VOL" | tr ' ' _)
+romsha() { openssl dgst -sha256 -r "$1" | cut -d' ' -f1; }
+copied() { stat -f '%z %m' "$common/$1.rom"; }   # the copy on the card: size, time
+recorded() {   # set, SHA-256: this card has had the image since it was copied
+	[ -f "$common/$1.rom" ] && grep -qxF "$card_id $1 $2 $(copied "$1")" "$ROMREC" 2>/dev/null
+}
+remember() {   # set, SHA-256
+	{ grep -v "^$card_id $1 " "$ROMREC" 2>/dev/null || true; echo "$card_id $1 $2 $(copied "$1")"; } >"$ROMREC.tmp"
+	mv "$ROMREC.tmp" "$ROMREC"
+}
 for s in ${roms[@]+"${roms[@]}"}; do
+	h=$(romsha "$ROMS/$s.rom")
+	if [ $FULL = 0 ] && recorded "$s" "$h"; then
+		echo "  $s.rom already on the card (recorded)"
+		continue
+	fi
 	if cmp -s "$ROMS/$s.rom" "$common/$s.rom"; then
 		echo "  $s.rom already on the card"
 	else
@@ -127,6 +149,7 @@ for s in ${roms[@]+"${roms[@]}"}; do
 		cmp -s "$ROMS/$s.rom" "$common/$s.rom" || { echo "copy of $s.rom differs"; exit 1; }
 		echo "  $s.rom copied"
 	fi
+	remember "$s" "$h"
 done
 
 # drop the ._ AppleDouble files macOS writes beside them on a FAT card
