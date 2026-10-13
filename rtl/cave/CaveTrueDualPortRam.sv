@@ -43,6 +43,8 @@ module CaveTrueDualPortRam #(
         .dout_a (dout_a),
         .clk_b  (clock_b),
         .rd_b   (rd_b),
+        .wr_b   (1'b0),
+        .din_b  ({DATA_WIDTH_B{1'b0}}),
         .addr_b (addr_b),
         .dout_b (dout_b)
       );
@@ -66,6 +68,8 @@ module CaveTrueDualPortRam #(
         .dout_a (dout_a),
         .clk_b  (clock_b),
         .rd_b   (rd_b),
+        .wr_b   (1'b0),
+        .din_b  ({DATA_WIDTH_B{1'b0}}),
         .addr_b (addr_b),
         .dout_b (dout_b)
       );

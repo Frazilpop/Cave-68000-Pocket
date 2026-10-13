@@ -1,0 +1,110 @@
+# Cave 68000 for Analogue Pocket — the board alone through Quartus, for its
+# fit and timing on the Pocket's part (docs/pocket/PLAN.md, milestone 2).
+# Every port is a virtual pin but the clocks. pocket/fit/fit.sh runs it; the
+# database lands under build/pocket/fit/.
+set_global_assignment -name FAMILY "Cyclone V"
+set_global_assignment -name DEVICE 5CEBA4F23C8
+set_global_assignment -name TOP_LEVEL_ENTITY cave_fit_top
+set_global_assignment -name PROJECT_OUTPUT_DIRECTORY output_files
+# One processor: under Rosetta quartus_map's parallel children crash (as found
+# for Mille Miglia, Kaneko16-Pocket pocket/src/fpga/ap_core.qsf).
+set_global_assignment -name NUM_PARALLEL_PROCESSORS 1
+set_global_assignment -name OPTIMIZATION_MODE "HIGH PERFORMANCE EFFORT"
+set_global_assignment -name SDC_FILE fit.sdc
+# every port a virtual pin but clk_74a (a blanket `-to *` took the clock pin
+# with it and its location assignment failed)
+set_instance_assignment -name VIRTUAL_PIN ON -to rst
+set_instance_assignment -name VIRTUAL_PIN ON -to rst_cpu
+set_instance_assignment -name VIRTUAL_PIN ON -to rst_vid
+set_instance_assignment -name VIRTUAL_PIN ON -to rom_loaded
+set_instance_assignment -name VIRTUAL_PIN ON -to game
+set_instance_assignment -name VIRTUAL_PIN ON -to p1
+set_instance_assignment -name VIRTUAL_PIN ON -to p2
+set_instance_assignment -name VIRTUAL_PIN ON -to coin
+set_instance_assignment -name VIRTUAL_PIN ON -to start
+set_instance_assignment -name VIRTUAL_PIN ON -to service
+set_instance_assignment -name VIRTUAL_PIN ON -to pause
+set_instance_assignment -name VIRTUAL_PIN ON -to dsw
+set_instance_assignment -name VIRTUAL_PIN ON -to prog_*
+set_instance_assignment -name VIRTUAL_PIN ON -to snd_*
+set_instance_assignment -name VIRTUAL_PIN ON -to tile_*
+set_instance_assignment -name VIRTUAL_PIN ON -to spr_*
+set_instance_assignment -name VIRTUAL_PIN ON -to fb_*
+set_instance_assignment -name VIRTUAL_PIN ON -to ee_*
+set_instance_assignment -name VIRTUAL_PIN ON -to ce_pix
+set_instance_assignment -name VIRTUAL_PIN ON -to hs
+set_instance_assignment -name VIRTUAL_PIN ON -to vs
+set_instance_assignment -name VIRTUAL_PIN ON -to hblank
+set_instance_assignment -name VIRTUAL_PIN ON -to vblank
+set_instance_assignment -name VIRTUAL_PIN ON -to de
+set_instance_assignment -name VIRTUAL_PIN ON -to r
+set_instance_assignment -name VIRTUAL_PIN ON -to g
+set_instance_assignment -name VIRTUAL_PIN ON -to b
+set_instance_assignment -name VIRTUAL_PIN ON -to snd
+# the one real pin: the Pocket's 74.25 MHz reference, the PLLs' input
+set_location_assignment PIN_V15 -to clk_74a
+set_instance_assignment -name IO_STANDARD "3.3-V LVCMOS" -to clk_74a
+
+# the fit's top: the board behind the shell's PLLs
+set_global_assignment -name SYSTEMVERILOG_FILE cave_fit_top.sv
+
+# the board (keep in step with sim/ddonpach/build.sh and pocket/src/fpga/board.qip)
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/top/cave68000.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/cave/AudioMixer.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/cave/AudioPipeline.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/cave/CaveAsyncMemArbiters.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/cave/CaveBoardProfile.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/cave/CaveBurstBuffers.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/cave/CaveBurstDMAs.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/cave/CaveBurstMemArbiters.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/cave/CaveClockEnable.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/cave/CaveCpuResetBridge.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/cave/CaveCpuWrappers.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/cave/CaveDataFreezers.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/cave/CaveDualClockFIFO.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/cave/CaveGameConfig.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/cave/CaveLayerProcessor.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/cave/CaveMainSupport.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/cave/CavePageFlippers.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/cave/CaveReadCache.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/cave/CaveRegisterFiles.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/cave/CaveRequestQueues.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/cave/CaveSinglePortRam.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/cave/CaveSpriteHelpers.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/cave/CaveSyncQueue.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/cave/CaveSyncReadMem.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/cave/CaveTileRomClockCrossing.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/cave/CaveTrueDualPortRam.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/cave/CaveVideoTiming.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/cave/CaveYMZ280BHelpers.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/cave/ChannelController.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/cave/ColorMixer.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/cave/EEPROM.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/cave/GPU.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/cave/Main.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/cave/Sound.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/cave/SpriteBlitter.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/cave/SpriteDecoder.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/cave/SpriteFrameBuffer.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/cave/SpriteProcessor.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/cave/VideoSys.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/cave/YMZ280B.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/cave/savestate/CaveSaveStateBus.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/cave/savestate/CaveSaveStateRamPort.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/cave/savestate/CaveSaveStateRamWrappers.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/cave/savestate/CaveSaveStateRegisterPort.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/cave/savestate/CaveSaveStateWideRamPort.sv
+
+# the arcadia memories: altsyncram and dcfifo, from nullobject's VHDL wrappers
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/arcadia/single_port_ram.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/arcadia/true_dual_port_ram.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/arcadia/dual_clock_fifo.sv
+
+# fx68k: hdl/ is ijor's synthesis code. Its microcode is read with
+# $readmemb("microrom.mem") relative to the project directory, so the two
+# .mem files are linked next to this file (pocket/fit/*.mem, by fit.sh).
+set_global_assignment -name SYSTEMVERILOG_FILE ../../third_party/fx68k/hdl/fx68k.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../third_party/fx68k/hdl/fx68kAlu.sv
+set_global_assignment -name SYSTEMVERILOG_FILE ../../third_party/fx68k/hdl/uaddrPla.sv
+
+set_global_assignment -name LAST_QUARTUS_VERSION "21.1.1 Lite Edition"

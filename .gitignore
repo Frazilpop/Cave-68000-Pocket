@@ -103,3 +103,7 @@ Thumbs.db
 # The working notes, kept on disk and never published.
 /CLAUDE.md
 /docs/
+
+# fx68k's microcode beside the fit project, linked there by pocket/fit/fit.sh
+/pocket/fit/microrom.mem
+/pocket/fit/nanorom.mem

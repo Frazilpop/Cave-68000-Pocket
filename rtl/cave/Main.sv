@@ -4527,40 +4527,20 @@ module Main(
     .io_serial_sdo (_eeprom_io_serial_sdo)
   );
   assign io_ss_clients_idle = eepromSaveStateIdle;
-  CaveHighScoreManager highScoreManager (
-    .sys_clock        (io_systemClock),
-    .sys_reset        (io_systemReset),
-    .cpu_clock        (clock),
-    .cpu_reset        (io_highScoreReset),
-    .config_download  (io_hs_config_download),
-    .config_wr        (io_hs_config_wr),
-    .config_addr      (io_hs_config_addr),
-    .config_dout      (io_hs_config_dout),
-    .nvram_download   (io_hs_nvram_download),
-    .nvram_upload     (io_hs_nvram_upload),
-    .nvram_rd         (io_hs_nvram_rd),
-    .nvram_wr         (io_hs_nvram_wr),
-    .nvram_addr       (io_hs_nvram_addr),
-    .nvram_dout       (io_hs_nvram_dout),
-    .nvram_din        (io_hs_nvram_din),
-    .nvram_wait_n     (io_hs_nvram_wait_n),
-    .ss_hold_cpu      (io_ss_hold),
-    .cpu_idle         (io_ss_cpu_idle),
-    .normal_ram_wr    (mainRam_io_wr),
-    .normal_byte_addr (cpuByteAddr),
-    .normal_ram_mask  (mainRam_io_mask),
-    .normal_ram_din   (_cpu_io_dout),
-    .cpu_hold         (highScoreCpuHold),
-    .ram_owned        (highScoreRamOwned),
-    .ram_rd           (highScoreRamRd),
-    .ram_wr           (highScoreRamWr),
-    .ram_addr         (highScoreRamAddr),
-    .ram_mask         (highScoreRamMask),
-    .ram_din          (highScoreRamDin),
-    .ram_dout         (_mainRam_io_dout),
-    .dirty_sys        (io_hs_dirty),
-    .active_sys       (io_hs_active)
-  );
+  // Cave 68000 for Analogue Pocket: upstream's high-score manager (MiSTer's
+  // hiscore.dat support, which borrows the work RAM from the 68000) is not
+  // part of this port. Its ports stay for the moment; nothing drives them.
+  assign highScoreCpuHold   = 1'b0;
+  assign highScoreRamOwned  = 1'b0;
+  assign highScoreRamRd     = 1'b0;
+  assign highScoreRamWr     = 1'b0;
+  assign highScoreRamAddr   = 15'd0;
+  assign highScoreRamMask   = 2'b00;
+  assign highScoreRamDin    = 16'd0;
+  assign io_hs_nvram_din    = 16'd0;
+  assign io_hs_nvram_wait_n = 1'b1;
+  assign io_hs_dirty        = 1'b0;
+  assign io_hs_active       = 1'b0;
   CaveSaveStateRamPort #(
     .WIDTH        (16),
     .ADDR_WIDTH   (15),
