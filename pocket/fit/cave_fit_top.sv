@@ -31,8 +31,9 @@ module cave_fit_top (
   output wire [2:0]  tile_rd,  output wire [74:0] tile_addr, input wire [47:0] tile_dout, input wire [2:0] tile_wait_n, input wire [2:0] tile_valid,
   output wire        spr_rd,   output wire [31:0] spr_addr,  input wire [63:0] spr_dout,  input wire spr_wait_n,  input wire spr_valid,
   output wire [7:0]  spr_burst_len, input wire spr_burst_done,
-  output wire        fb_rd, fb_wr, output wire [31:0] fb_addr, output wire [7:0] fb_mask, output wire [63:0] fb_din,
-  input  wire [63:0] fb_dout, input wire fb_wait_n, input wire fb_valid, output wire [7:0] fb_burst_len, input wire fb_burst_done,
+  output wire        fbr_rd, output wire [31:0] fbr_addr, input wire [63:0] fbr_dout, input wire fbr_wait_n, input wire fbr_valid, input wire fbr_burst_done,
+  output wire        fb_wr, output wire [31:0] fb_addr, output wire [7:0] fb_mask, output wire [63:0] fb_din,
+  input  wire        fb_wait_n, output wire [7:0] fb_burst_len, input wire fb_burst_done,
   output wire        ee_rd, ee_wr, output wire [6:0] ee_addr, output wire [15:0] ee_din, input wire [15:0] ee_dout, input wire ee_wait_n, input wire ee_valid,
 
   output wire        ce_pix, hs, vs, hblank, vblank, de,
@@ -86,11 +87,12 @@ module cave_fit_top (
     .tile_rd (tile_rd), .tile_addr (tile_addr), .tile_dout (tile_dout), .tile_wait_n (tile_wait_n), .tile_valid (tile_valid),
     .spr_rd (spr_rd), .spr_addr (spr_addr), .spr_dout (spr_dout), .spr_wait_n (spr_wait_n), .spr_valid (spr_valid),
     .spr_burst_len (spr_burst_len), .spr_burst_done (spr_burst_done),
-    .fb_rd (fb_rd), .fb_wr (fb_wr), .fb_addr (fb_addr), .fb_mask (fb_mask), .fb_din (fb_din),
-    .fb_dout (fb_dout), .fb_wait_n (fb_wait_n), .fb_valid (fb_valid), .fb_burst_len (fb_burst_len), .fb_burst_done (fb_burst_done),
+    .fbr_rd (fbr_rd), .fbr_addr (fbr_addr), .fbr_dout (fbr_dout), .fbr_wait_n (fbr_wait_n), .fbr_valid (fbr_valid), .fbr_burst_done (fbr_burst_done),
+    .fb_wr (fb_wr), .fb_addr (fb_addr), .fb_mask (fb_mask), .fb_din (fb_din),
+    .fb_wait_n (fb_wait_n), .fb_burst_len (fb_burst_len), .fb_burst_done (fb_burst_done),
     .ee_rd (ee_rd), .ee_wr (ee_wr), .ee_addr (ee_addr), .ee_din (ee_din), .ee_dout (ee_dout), .ee_wait_n (ee_wait_n), .ee_valid (ee_valid),
     .ce_pix (ce_pix), .hs (hs), .vs (vs), .hblank (hblank), .vblank (vblank), .de (de), .r (r), .g (g), .b (b),
-    .snd (snd)
+    .snd (snd), .snd_sample (), .snd_overrun (), .spr_swap ()
   );
 
 endmodule

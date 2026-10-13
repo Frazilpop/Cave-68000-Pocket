@@ -53,8 +53,26 @@
 // for it; '+' marks those) – so sim/ymz280b's model can play the board's
 // own run back (model_vs_mame --true-rate). stats.csv gains the most clk_cpu clocks a sample
 // took that frame (of 362.8) and the samples that came late.
+//
+// Built with -DPOCKET_MEM (sim/ddonpach/build.sh --pocket, binary tb_pocket)
+// the harness hosts sim/ddonpach/cave68000_psim.sv instead: the board behind
+// its Pocket adapters, on kaneko_sdram and an SDRAM model holding the image
+// (loaded here before reset, the EEPROM region also streamed past the board
+// as the loader would), and on pocket_psram_rows and a PSRAM model per frame
+// buffer chip. --rom-lat, --spr-lat and --fb-lat do nothing there; stats.csv's
+// spr_bursts column counts sprite lines, fb_rd_bursts and fb_wr_beats the
+// rows read and written. The board is released once both memories are ready,
+// and the PSRAMs' measured latencies and the models' protocol violations are
+// printed at the end.
 
+#ifdef POCKET_MEM
+#include "Vcave68000_psim.h"
+#include "Vcave68000_psim___024root.h"
+typedef Vcave68000_psim Top;
+#else
 #include "Vcave68000_sim.h"
+typedef Vcave68000_sim Top;
+#endif
 #include "verilated.h"
 
 #include <cstdio>
@@ -146,7 +164,7 @@ int main(int argc, char** argv) {
     uint16_t ee[64];
 
     Verilated::commandArgs(argc, argv);
-    Vcave68000_sim* t = new Vcave68000_sim;
+    Top* t = new Top;
 
     t->game = game;
     t->rst = 1; t->rst_cpu = 1; t->rst_vid = 1; t->rom_loaded = 0;
@@ -154,10 +172,20 @@ int main(int argc, char** argv) {
     t->dsw = 0xfffb;
     t->clk = 0; t->clk_cpu = 0; t->clk_vid = 0;
     t->eval();
+#ifdef POCKET_MEM
+    {
+        // word w of the image at the chip's word cave_sdram puts it at
+        auto& sd = t->rootp->cave68000_psim__DOT__sdram_dev__DOT__mem;
+        for (uint32_t w = 0; w < (32u << 20); w++)
+            sd[(((w >> 10) & 3) << 23) | ((w >> 12) << 10) | (w & 0x3ff)] = rom16(2 * w);
+    }
+    (void)ee;
+#else
     {
         uint32_t off = t->eeprom_offset;
         for (int i = 0; i < 64; i++) ee[i] = (uint16_t)(rom[off + 2 * i] << 8 | rom[off + 2 * i + 1]);
     }
+#endif
 
     // ------------------------------------------------------------- clocking
     uint64_t cyc = 0;          // clk periods
@@ -190,8 +218,33 @@ int main(int argc, char** argv) {
     uint32_t fbw_base = 0;
     struct { bool busy = false; bool rd = false; uint32_t a = 0; } eep;
 
+#ifdef POCKET_MEM
+    // power-on: the memories come up (the SDRAM's init, the PSRAMs' power-up
+    // and calibration), the EEPROM region streams past as the loader sends it
+    t->dl_wr = 0;
+    {
+        uint64_t n = 0;
+        while (!(t->sdram_ready && t->psram_ready)) {
+            half(0); half(1); cyc++;
+            if (++n > 4000000) { fprintf(stderr, "the memories never came up\n"); return 1; }
+        }
+        fprintf(stderr, "memories ready after %llu clocks; PSRAM latencies chip 0 rd %d (phase %d) wr %d, "
+                "chip 1 rd %d (phase %d) wr %d%s\n",
+                (unsigned long long)n, t->psram_lats & 7, (t->psram_lats >> 3) & 1, (t->psram_lats >> 4) & 7,
+                (t->psram_lats >> 7) & 7, (t->psram_lats >> 10) & 1, (t->psram_lats >> 11) & 7,
+                t->psram_cal_fail ? " (CALIBRATION FAILED)" : "");
+        if (game != 6)
+            for (int i = 0; i < 64; i++) {
+                t->dl_wr = 1; t->dl_addr = (0x100000 >> 1) + i; t->dl_data = rom16(0x100000 + 2 * i);
+                half(0); half(1); cyc++;
+                t->dl_wr = 0;
+                half(0); half(1); cyc++;
+            }
+    }
+#else
     t->prog_wait_n = 1; t->snd_wait_n = 1; t->tile_wait_n = 7;
-    t->spr_wait_n = 1; t->fb_wait_n = 1; t->ee_wait_n = 1;
+    t->spr_wait_n = 1; t->fb_wait_n = 1; t->fbr_wait_n = 1; t->ee_wait_n = 1;
+#endif
 
     // power-on: reset held a while with the image in place
     for (int i = 0; i < 64; i++) { half(0); half(1); cyc++; }
@@ -204,7 +257,11 @@ int main(int argc, char** argv) {
     int x = 0, y = 0, frame = 1;
     int prev_hb = 1, prev_vb = 1;
     FILE* stats = fopen((outdir + "/stats.csv").c_str(), "w");
-    fprintf(stats, "frame,cycles,bus_cycles,max_wait,max_wait_addr,irqs,swaps,spr_bursts,fb_rd_bursts,fb_wr_beats,snd_max_clocks,snd_late\n");
+    fprintf(stats, "frame,cycles,bus_cycles,max_wait,max_wait_addr,irqs,swaps,spr_bursts,fb_rd_bursts,fb_wr_beats,snd_max_clocks,snd_late");
+#ifdef POCKET_MEM
+    fprintf(stats, ",draw_clk,fb_rd_wait,wait_prog,wait_snd,wait_l0,wait_l1,wait_l2,wait_spr0,wait_spr1");
+#endif
+    fprintf(stats, "\n");
 
     // ------------------------------------------------------------- sound
     // the board's true rate for the log's times; MAME's whole one in the WAV
@@ -226,6 +283,14 @@ int main(int argc, char** argv) {
     uint64_t as_start = 0, max_wait = 0; uint32_t max_wait_addr = 0; bool waiting = false;
     uint64_t bus_f = 0, irq_f = 0, swap_f = 0, sprb_f = 0, fbr_f = 0, fbw_f = 0;
     bool swap_prev = false;
+#ifdef POCKET_MEM
+    uint16_t rows_w_prev = t->fb_rows_written, rows_r_prev = t->fb_rows_read;
+    uint8_t rom_req_prev = 0;
+    uint16_t rows_seen = rows_w_prev;
+    uint64_t swap_at = 0, draw_end = 0, draw_max_f = 0, draw_max = 0;
+    uint64_t req_at[7] = {0}, req_max_f[7] = {0}, req_max[7] = {0};
+    std::vector<uint64_t> lat_hist(128, 0);     // the layers' line reads, by clocks
+#endif
     int loaded_frame = -1;       // --replay: the frame the loader finished in
     bool replay_done = false;
 
@@ -233,6 +298,7 @@ int main(int argc, char** argv) {
         // ---- the falling half: the board settles on this period's inputs
         half(0);
 
+#ifndef POCKET_MEM
         // ---- requests taken at the coming edge
         {
             bool rd[5] = { (bool)t->prog_rd, (bool)t->snd_rd,
@@ -245,8 +311,8 @@ int main(int argc, char** argv) {
             spr.busy = true; spr.cnt = spr_lat; spr.addr = t->spr_addr; spr.len = t->spr_len; spr.beat = 0;
             sprb_f++;
         }
-        if (t->fb_rd && t->fb_wait_n) {
-            fbr.busy = true; fbr.cnt = fb_lat; fbr.addr = t->fb_addr; fbr.len = t->fb_len; fbr.beat = 0;
+        if (t->fbr_rd && t->fbr_wait_n) {
+            fbr.busy = true; fbr.cnt = fb_lat; fbr.addr = t->fbr_addr; fbr.len = 16; fbr.beat = 0;
             fbr_f++;
         }
         if (t->fb_wr && t->fb_wait_n) {
@@ -267,10 +333,12 @@ int main(int argc, char** argv) {
             eep.busy = true; eep.rd = t->ee_rd; eep.a = a;
         }
 
+#endif
         // ---- the rising half
         half(1);
         cyc++;
 
+#ifndef POCKET_MEM
         // ---- the memories answer for the next period
         {
             uint16_t dout[5] = {0}; bool valid[5] = {false};
@@ -296,15 +364,16 @@ int main(int argc, char** argv) {
             }
         }
         t->spr_wait_n = !spr.busy;
-        t->fb_valid = 0;
+        t->fbr_valid = 0;
         if (fbr.busy) {
             if (fbr.cnt > 0) fbr.cnt--;
             else {
-                t->fb_dout = fbmem[((fbr.addr >> 3) + fbr.beat) & ((1u << 18) - 1)]; t->fb_valid = 1;
+                t->fbr_dout = fbmem[((fbr.addr >> 3) + fbr.beat) & ((1u << 18) - 1)]; t->fbr_valid = 1;
                 if (++fbr.beat == fbr.len) fbr.busy = false;
             }
         }
-        t->fb_wait_n = !fbr.busy;
+        t->fbr_wait_n = !fbr.busy;
+        t->fb_wait_n = 1;
         t->ee_valid = 0;
         if (eep.busy) {
             if (eep.rd) { t->ee_dout = ee[eep.a]; t->ee_valid = 1; }
@@ -312,6 +381,23 @@ int main(int argc, char** argv) {
         }
         t->ee_wait_n = !eep.busy;
 
+#else
+        {
+            uint8_t rq = t->dbg_rom_req;
+            uint8_t rise = rq & ~rom_req_prev, fall = ~rq & rom_req_prev;
+            for (int p = 0; p < 7; p++) {
+                if ((rise >> p) & 1) req_at[p] = cyc;
+                if ((fall >> p) & 1) {
+                    req_max_f[p] = std::max(req_max_f[p], cyc - req_at[p]);
+                    if (p >= 2 && p <= 4) lat_hist[std::min<uint64_t>(127, cyc - req_at[p])]++;
+                }
+            }
+            sprb_f += ((rise >> 5) & 1) + ((rise >> 6) & 1);
+            rom_req_prev = rq;
+            // the drawing time: from a swap to the last row written after it
+            if (t->fb_rows_written != rows_seen) { rows_seen = t->fb_rows_written; draw_end = cyc; }
+        }
+#endif
         // ---- the 68000's bus, at each clk_cpu edge
         if (cpu_rose) {
             bool as = t->dbg_as;
@@ -343,6 +429,12 @@ int main(int argc, char** argv) {
             as_prev = as;
             bool sw = t->dbg_sprite_swap;
             if (sw && !swap_prev) swap_f++;
+#ifdef POCKET_MEM
+            if (sw && !swap_prev) {
+                if (swap_at && draw_end > swap_at) draw_max_f = std::max(draw_max_f, draw_end - swap_at);
+                swap_at = cyc;
+            }
+#endif
             swap_prev = sw;
 
             // the sound: a sample out and the next begun at each snd_sample
@@ -397,12 +489,24 @@ int main(int argc, char** argv) {
                     fprintf(f, "P6\n320 240\n255\n");
                     fwrite(img.data(), 1, img.size(), f);
                     fclose(f);
+                    std::vector<uint16_t> spr(320 * 240);
+#ifdef POCKET_MEM
+                    // the page on screen this frame: its chip, word y * 512 + x
+                    {
+                        auto& c0 = t->rootp->cave68000_psim__DOT__chip__BRA__0__KET____DOT__dev__DOT__mem;
+                        auto& c1 = t->rootp->cave68000_psim__DOT__chip__BRA__1__KET____DOT__dev__DOT__mem;
+                        bool one = t->dbg_fb_read_page & 1;
+                        for (int yy = 0; yy < 240; yy++)
+                            for (int xx = 0; xx < 320; xx++)
+                                spr[yy * 320 + xx] = one ? c1[yy * 512 + xx] : c0[yy * 512 + xx];
+                    }
+#else
                     // the page on screen this frame: rows of 512 pixels, four to a word
                     uint32_t page = (uint32_t)t->dbg_fb_read_page << 16;
-                    std::vector<uint16_t> spr(320 * 240);
                     for (int yy = 0; yy < 240; yy++)
                         for (int xx = 0; xx < 320; xx++)
                             spr[yy * 320 + xx] = (uint16_t)(fbmem[(page + yy * 128 + xx / 4) & ((1u << 18) - 1)] >> (16 * (xx % 4)));
+#endif
                     snprintf(fn, sizeof fn, "%s/sprites_%05d.bin", outdir.c_str(), replay);
                     f = fopen(fn, "wb");
                     fwrite(spr.data(), 2, spr.size(), f);
@@ -417,12 +521,28 @@ int main(int argc, char** argv) {
                     fwrite(img.data(), 1, img.size(), f);
                     fclose(f);
                 }
-                fprintf(stats, "%d,%llu,%llu,%llu,%06x,%llu,%llu,%llu,%llu,%llu,%llu,%llu\n", frame,
+#ifdef POCKET_MEM
+                fbr_f = (uint16_t)(t->fb_rows_read - rows_r_prev);
+                fbw_f = (uint16_t)(t->fb_rows_written - rows_w_prev);
+                rows_r_prev = t->fb_rows_read; rows_w_prev = t->fb_rows_written;
+#endif
+                fprintf(stats, "%d,%llu,%llu,%llu,%06x,%llu,%llu,%llu,%llu,%llu,%llu,%llu", frame,
                         (unsigned long long)cyc, (unsigned long long)bus_f,
                         (unsigned long long)max_wait, max_wait_addr,
                         (unsigned long long)irq_f, (unsigned long long)swap_f,
                         (unsigned long long)sprb_f, (unsigned long long)fbr_f, (unsigned long long)fbw_f,
                         (unsigned long long)snd_max_f, (unsigned long long)snd_late_f);
+#ifdef POCKET_MEM
+                // the longest draw (clk from a swap to the last row written
+                // after it) and the longest a line read waited for its first row
+                fprintf(stats, ",%llu,%u", (unsigned long long)draw_max_f, (unsigned)t->fb_rd_wait_max);
+                for (int p = 0; p < 7; p++) {
+                    fprintf(stats, ",%llu", (unsigned long long)req_max_f[p]);
+                    req_max[p] = std::max(req_max[p], req_max_f[p]); req_max_f[p] = 0;
+                }
+                draw_max = std::max(draw_max, draw_max_f); draw_max_f = 0;
+#endif
+                fprintf(stats, "\n");
                 fflush(stats);
                 if (ymz_log) fprintf(ymz_log, "# frame %d %.12f\n", frame, (snd_started + 0.5) / snd_rate);
                 bus_f = irq_f = swap_f = sprb_f = fbr_f = fbw_f = 0;
@@ -454,6 +574,18 @@ int main(int argc, char** argv) {
     }
     if (snd_started > 0)
         fprintf(stderr, "sound: %ld samples, %llu late\n", snd_started, (unsigned long long)snd_late);
+#ifdef POCKET_MEM
+    fprintf(stderr, "memory models: %u SDRAM violations, %u PSRAM violations; longest draw %llu clk, "
+            "longest line read wait %u clk\n",
+            (unsigned)t->sdram_violations, (unsigned)t->psram_violations,
+            (unsigned long long)draw_max, (unsigned)t->fb_rd_wait_max);
+    fprintf(stderr, "longest request to acknowledge, clk: program %llu, samples %llu, layers %llu %llu %llu, sprites %llu %llu\n",
+            (unsigned long long)req_max[0], (unsigned long long)req_max[1], (unsigned long long)req_max[2],
+            (unsigned long long)req_max[3], (unsigned long long)req_max[4], (unsigned long long)req_max[5],
+            (unsigned long long)req_max[6]);
+    if (getenv("LAT_HIST"))
+        for (int i = 0; i < 128; i++) if (lat_hist[i]) fprintf(stderr, "  layer line read %3d clk: %llu\n", i, (unsigned long long)lat_hist[i]);
+#endif
     if (replay >= 0 && !replay_done) {
         fprintf(stderr, loaded_frame < 0 ? "the loader never finished\n" : "ran out of frames\n");
         return 1;

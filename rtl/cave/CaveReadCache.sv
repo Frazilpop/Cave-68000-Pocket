@@ -1,12 +1,21 @@
 // This file is a Codex-assisted rewrite based on the original work of
 // Josh Bassett (nullobject).
+//
+// Cave 68000 for Analogue Pocket: RAMSTYLE for the two ways' memories
+// (CaveSyncReadMem); and the way to replace on a miss is read from the LRU
+// bits at CHECK, by the registered index, instead of at the start by the
+// incoming address. lru_reg changes only at CHECK, so it is the same bit; but
+// the program ROM's freezer hands its address over on the falling edge, and
+// the 128-way lookup from it into way_reg was half a 96 MHz period, which
+// the Pocket's part missed.
 
 module CaveReadCache #(
   parameter IN_ADDR_WIDTH = 20,
   parameter IN_DATA_WIDTH = 16,
   parameter OUT_ADDR_WIDTH = 25,
   parameter INDEX_WIDTH = 7,
-  parameter TAG_WIDTH = 11
+  parameter TAG_WIDTH = 11,
+  parameter RAMSTYLE = "AUTO"
 ) (
   input                         clock,
   input                         reset,
@@ -86,11 +95,11 @@ module CaveReadCache #(
   wire                   hit_a = way_a_valid & (way_a_tag == request_tag);
   wire                   hit_b = way_b_valid & (way_b_tag == request_tag);
   wire                   hit = hit_a | hit_b;
-  wire [DEPTH-1:0]       lru_shifted = lru_reg >> current_index;
+  wire [DEPTH-1:0]       lru_shifted = lru_reg >> request_index;
   wire                   lru_way = lru_shifted[0];
-  // This value is sampled only in STATE_CHECK. way_reg already holds the
-  // replacement choice captured when the request started in STATE_IDLE.
-  wire                   selected_way = (state_check & hit) ? ~hit_a : way_reg;
+  // This value is sampled only in STATE_CHECK: the hit way, or on a miss the
+  // least recently used one.
+  wire                   selected_way = state_check ? (hit ? ~hit_a : lru_way) : way_reg;
   wire                   selected_valid = selected_way ? way_b_valid : way_a_valid;
   wire                   selected_dirty = selected_way ? way_b_dirty : way_a_dirty;
   wire [TAG_WIDTH-1:0]   selected_tag = selected_way ? way_b_tag : way_a_tag;
@@ -245,7 +254,7 @@ module CaveReadCache #(
 
       if (state_check) begin
         lru_reg <= hit ? set_lru_bit(lru_reg, request_index, hit_a)
-                       : set_lru_bit(lru_reg, request_index, ~way_reg);
+                       : set_lru_bit(lru_reg, request_index, ~lru_way);
         entry_valid <= selected_valid;
         entry_dirty <= selected_dirty;
         entry_tag <= selected_tag;
@@ -267,10 +276,8 @@ module CaveReadCache #(
           entry_word_3 <= io_out_dout;
       end
 
-      if (state_check & hit)
-        way_reg <= ~hit_a;
-      else if (start)
-        way_reg <= lru_way;
+      if (state_check)
+        way_reg <= hit ? ~hit_a : lru_way;
     end
   end
 
@@ -286,7 +293,8 @@ module CaveReadCache #(
   CaveSyncReadMem #(
     .ADDR_WIDTH (INDEX_WIDTH),
     .DATA_WIDTH (ENTRY_WIDTH),
-    .DEPTH      (DEPTH)
+    .DEPTH      (DEPTH),
+    .RAMSTYLE   (RAMSTYLE)
   ) cache_entry_mem_a (
     .read_addr  (current_index),
     .read_en    (1'b1),
@@ -301,7 +309,8 @@ module CaveReadCache #(
   CaveSyncReadMem #(
     .ADDR_WIDTH (INDEX_WIDTH),
     .DATA_WIDTH (ENTRY_WIDTH),
-    .DEPTH      (DEPTH)
+    .DEPTH      (DEPTH),
+    .RAMSTYLE   (RAMSTYLE)
   ) cache_entry_mem_b (
     .read_addr  (current_index),
     .read_en    (1'b1),

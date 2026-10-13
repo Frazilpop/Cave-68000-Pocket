@@ -99,15 +99,18 @@ module cave68000_sim (
   input  wire [63:0] spr_dout,
   input  wire        spr_wait_n, spr_valid,
 
-  // frame buffer, as upstream's DDR saw it
-  output wire        fb_rd, fb_wr,
+  // frame buffer, as upstream's DDR saw it: line reads on their own port
+  output wire        fbr_rd,
+  output wire [31:0] fbr_addr,
+  input  wire [63:0] fbr_dout,
+  input  wire        fbr_wait_n, fbr_valid,
+  output wire        fb_wr,
   output wire [31:0] fb_addr,
   output wire [7:0]  fb_mask,
   output wire [63:0] fb_din,
   output wire [7:0]  fb_len,
   output wire [7:0]  fb_beat,
-  input  wire [63:0] fb_dout,
-  input  wire        fb_wait_n, fb_valid,
+  input  wire        fb_wait_n,
 
   // the 93C46's store
   output wire        ee_rd, ee_wr,
@@ -150,7 +153,7 @@ module cave68000_sim (
   wire [31:0] spr_a;
   wire        spr_rd_b, spr_done;
   wire [7:0]  spr_len_b;
-  wire        fb_rd_b, fb_wr_b, fb_done;
+  wire        fb_wr_b, fb_done, fbr_rd_b, fbr_done;
   wire [7:0]  fb_len_b;
 
   assign prog_addr = {7'd0, prog_a};
@@ -166,11 +169,17 @@ module cave68000_sim (
     .ddr_wait_n (spr_wait_n), .ddr_valid (spr_valid),
     .ddr_rd (spr_rd), .ddr_wr (), .ddr_burstLength (spr_len), .beat ()
   );
+  sim_ddr_port fbr_port (
+    .clock (clk), .reset (rst),
+    .mem_rd (fbr_rd_b), .mem_wr (1'b0), .mem_burstLength (8'd16), .mem_burstDone (fbr_done),
+    .ddr_wait_n (fbr_wait_n), .ddr_valid (fbr_valid),
+    .ddr_rd (fbr_rd), .ddr_wr (), .ddr_burstLength (), .beat ()
+  );
   sim_ddr_port fb_port (
     .clock (clk), .reset (rst),
-    .mem_rd (fb_rd_b), .mem_wr (fb_wr_b), .mem_burstLength (fb_len_b), .mem_burstDone (fb_done),
-    .ddr_wait_n (fb_wait_n), .ddr_valid (fb_valid),
-    .ddr_rd (fb_rd), .ddr_wr (fb_wr), .ddr_burstLength (fb_len), .beat (fb_beat)
+    .mem_rd (1'b0), .mem_wr (fb_wr_b), .mem_burstLength (fb_len_b), .mem_burstDone (fb_done),
+    .ddr_wait_n (fb_wait_n), .ddr_valid (1'b0),
+    .ddr_rd (), .ddr_wr (fb_wr), .ddr_burstLength (fb_len), .beat (fb_beat)
   );
 
   cave68000 dut (
@@ -188,13 +197,15 @@ module cave68000_sim (
     .spr_rd (spr_rd_b), .spr_addr (spr_a), .spr_dout (spr_dout),
     .spr_wait_n (spr_wait_n), .spr_valid (spr_valid),
     .spr_burst_len (spr_len_b), .spr_burst_done (spr_done),
-    .fb_rd (fb_rd_b), .fb_wr (fb_wr_b), .fb_addr (fb_addr), .fb_mask (fb_mask),
-    .fb_din (fb_din), .fb_dout (fb_dout), .fb_wait_n (fb_wait_n), .fb_valid (fb_valid),
-    .fb_burst_len (fb_len_b), .fb_burst_done (fb_done),
+    .fbr_rd (fbr_rd_b), .fbr_addr (fbr_addr), .fbr_dout (fbr_dout),
+    .fbr_wait_n (fbr_wait_n), .fbr_valid (fbr_valid), .fbr_burst_done (fbr_done),
+    .fb_wr (fb_wr_b), .fb_addr (fb_addr), .fb_mask (fb_mask), .fb_din (fb_din),
+    .fb_wait_n (fb_wait_n), .fb_burst_len (fb_len_b), .fb_burst_done (fb_done),
     .ee_rd (ee_rd), .ee_wr (ee_wr), .ee_addr (ee_addr), .ee_din (ee_din),
     .ee_dout (ee_dout), .ee_wait_n (ee_wait_n), .ee_valid (ee_valid),
     .ce_pix (ce_pix), .hs (hs), .vs (vs), .hblank (hblank), .vblank (vblank), .de (de),
-    .r (r), .g (g), .b (b), .snd (snd), .snd_sample (snd_sample), .snd_overrun (snd_overrun)
+    .r (r), .g (g), .b (b), .snd (snd), .snd_sample (snd_sample), .snd_overrun (snd_overrun),
+    .spr_swap ()
   );
 
   assign dbg_as    = dut.main._cpu_io_as;

@@ -1,5 +1,15 @@
 // This file is a Codex-assisted rewrite based on the original work of
 // Josh Bassett (nullobject).
+//
+// Cave 68000 for Analogue Pocket: the next tile is latched as early as the
+// tile RAM has it (latchTile below), which gives the tile ROM two more pixels
+// to answer. The ROM is read as a fixed-latency stream – the pixels are taken
+// from whatever data has come back by latchPix – and on the Pocket the three
+// layers share one SDRAM with the sprite fetch, where a line read can wait
+// behind the other layers' (all three change tile at the same pixel). The
+// pixels drawn are the same; only the window from a tile's address to its
+// pixels grows, from 5 pixels to 7 (8 x 8 tiles, and the first half of a
+// 16 x 16 tile; the second half already had 7).
 
 // Shared tilemap layer renderer used by the three Cave background layers.
 module CaveLayerProcessor #(
@@ -188,11 +198,16 @@ module CaveLayerProcessor #(
       tileRomAddr = {3'b000, tileReg_code, tileOffset_y[2:1], 3'b000};
   end
 
+  // The tile under column + 1 is in the tile RAM's output from the first
+  // pixel of this tile (its address follows the position, read a clock
+  // later). A 16 x 16 tile still needs its own code for the second half's
+  // fetch (offsets 0-7 fetch the half shown at 8-15), so it latches the next
+  // at offset 8; mirrored when flipped.
   wire latchTile =
     io_video_clockEnable
     & (io_ctrl_regs_flipX
-       ? tileOffset_x == 4'h5
-       : (io_ctrl_regs_tileSize ? tileOffset_x == 4'hA : tileOffset_x == 4'h2));
+       ? tileOffset_x == 4'h7
+       : (io_ctrl_regs_tileSize ? tileOffset_x == 4'h8 : tileOffset_x == 4'h0));
   wire latchColor =
     io_video_clockEnable
     & (io_ctrl_regs_flipX

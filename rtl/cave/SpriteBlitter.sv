@@ -1,5 +1,13 @@
 // This file is a Codex-assisted rewrite based on the original work of
 // Josh Bassett (nullobject).
+//
+// Cave 68000 for Analogue Pocket: the pixel's position is carried as a
+// running sum (accX, accY below) instead of multiplied out every pixel: the
+// span times the zoom, added to the start, was one 96 MHz cycle from the
+// column counter to posReg_x and the tag RAM's read address, and missed it
+// by half a nanosecond on the Pocket's part. The far edge's product comes
+// from SpriteProcessor with the sprite (io_config_bits_sprite_far_*). The
+// overdraw test compares both candidate tags before choosing between them.
 
 module SpriteBlitter(
   input         clock,
@@ -19,6 +27,8 @@ module SpriteBlitter(
   input  [7:0]  io_config_bits_sprite_rows,
   input  [15:0] io_config_bits_sprite_zoom_x,
   input  [15:0] io_config_bits_sprite_zoom_y,
+  input  [27:0] io_config_bits_sprite_far_x,      // (cols * 16 - 1) * zoom_x
+  input  [27:0] io_config_bits_sprite_far_y,      // (rows * 16 - 1) * zoom_y
   input         io_config_bits_hFlip,
   input  [8:0]  io_video_regs_size_x,
   input  [8:0]  io_video_regs_size_y,
@@ -93,17 +103,25 @@ module SpriteBlitter(
   // The position is the sprite's start (SpriteProcessor: whole pixels, as
   // MAME's sprite013 places it), and the k-th pixel from the start lands at
   // start + k * zoom / 256 - counted from the far edge of the source when
-  // the sprite is flipped, as the 013 draws it.
-  wire [11:0] spanX =
-    configReg_sprite_hFlip ? 12'({configReg_sprite_cols, 4'h0} - 12'h1 - x) : x;
-  wire [11:0] spanY =
-    configReg_sprite_vFlip ? 12'({configReg_sprite_rows, 4'h0} - 12'h1 - y) : y;
-  wire [27:0] flippedX = 28'({16'h0, spanX} * {12'h0, configReg_sprite_zoom_x});
-  wire [27:0] flippedY = 28'({16'h0, spanY} * {12'h0, configReg_sprite_zoom_y});
-  wire [27:0] adjustedX =
-    28'({{10{configReg_sprite_pos_x[17]}}, configReg_sprite_pos_x} + flippedX);
-  wire [27:0] adjustedY =
-    28'({{10{configReg_sprite_pos_y[17]}}, configReg_sprite_pos_y} + flippedY);
+  // the sprite is flipped, as the 013 draws it. That is pos + span * zoom,
+  // span = x (or cols * 16 - 1 - x flipped); x moves one at a time, so the
+  // sum is kept as it goes: accX is always pos + span(x) * zoom, modulo
+  // 2^28, starting each row at startX (pos, or pos + the far edge flipped)
+  // and stepping by the zoom, down when flipped. The same for y.
+  reg  [27:0] accX, accY;
+  reg  [27:0] startX, startY;
+  wire [27:0] newStartX =
+    28'({{10{io_config_bits_sprite_pos_x[17]}}, io_config_bits_sprite_pos_x}
+        + (io_config_bits_sprite_hFlip ? io_config_bits_sprite_far_x : 28'h0));
+  wire [27:0] newStartY =
+    28'({{10{io_config_bits_sprite_pos_y[17]}}, io_config_bits_sprite_pos_y}
+        + (io_config_bits_sprite_vFlip ? io_config_bits_sprite_far_y : 28'h0));
+  wire [27:0] stepX = configReg_sprite_hFlip ? 28'(28'h0 - {12'h0, configReg_sprite_zoom_x})
+                                             : {12'h0, configReg_sprite_zoom_x};
+  wire [27:0] stepY = configReg_sprite_vFlip ? 28'(28'h0 - {12'h0, configReg_sprite_zoom_y})
+                                             : {12'h0, configReg_sprite_zoom_y};
+  wire [27:0] adjustedX = accX;
+  wire [27:0] adjustedY = accY;
 
   wire pixelDataReady = frameBufferInputReady & (pisoEmpty | pisoAlmostEmpty);
   wire [19:0] maxVisibleX = {11'h0, 9'(io_video_regs_size_x - 9'h1)};
@@ -133,15 +151,22 @@ module SpriteBlitter(
   reg  [8:0]  lastTagAddr;
   reg  [18:0] lastTagData;
   reg         lastTagValid;
-  wire [18:0] pixelTag =
-    lastTagValid & lastTagAddr == posReg_x[8:0] ? lastTagData : rowTagOut;
   // (a row that starts a run has no earlier row in it: the comparisons with
   // the run's start run beside the test for a new one)
   wire        newRunP = rowFirstP & (spriteFirstP | posReg_y != prevRowY);
   wire [18:0] runStartP = newRunP ? rowSeqP : runStartReg;
-  wire overdrawn =
-    (hFlipP & pixelTag == rowSeqP)
-    | (vFlipP & ~newRunP & pixelTag >= runStartReg & pixelTag < rowSeqP);
+  // The pixel's tag is the last one written if it was written to this very
+  // column, else the tag RAM's; both are held against the rows beside the
+  // choice rather than after it (the 96 MHz path is shorter that way, on the
+  // Pocket's part).
+  wire        tagBypass = lastTagValid & lastTagAddr == posReg_x[8:0];
+  wire        ovLast =
+    (hFlipP & lastTagData == rowSeqP)
+    | (vFlipP & ~newRunP & lastTagData >= runStartReg & lastTagData < rowSeqP);
+  wire        ovRam =
+    (hFlipP & rowTagOut == rowSeqP)
+    | (vFlipP & ~newRunP & rowTagOut >= runStartReg & rowTagOut < rowSeqP);
+  wire overdrawn = tagBypass ? ovLast : ovRam;
   wire pixelVisible =
     posReg_x <= maxVisibleX
     & posReg_y <= maxVisibleY
@@ -174,6 +199,21 @@ module SpriteBlitter(
         x <= xAtEnd ? 12'h0 : 12'(x + 12'h1);
       if (xWrap)
         y <= yAtEnd ? 12'h0 : 12'(y + 12'h1);
+    end
+
+    // the running sums, in step with x and y (a new sprite starts at 0, 0:
+    // it is taken only when the last one has wrapped both)
+    if (latchConfig) begin
+      startX <= newStartX;
+      startY <= newStartY;
+      accX   <= newStartX;
+      accY   <= newStartY;
+    end
+    else begin
+      if (blitAdvance)
+        accX <= xAtEnd ? startX : 28'(accX + stepX);
+      if (xWrap)
+        accY <= yAtEnd ? startY : 28'(accY + stepY);
     end
 
     if (reset)
