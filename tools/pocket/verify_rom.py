@@ -22,6 +22,10 @@ then compares every region of the .rom image with MAME's:
   * the image must be exactly the regions' total, nothing over.
 
 Exit status 0 only if every set matches.
+
+    python3 -I tools/pocket/verify_rom.py ddonpach --stage
+
+only stages the files, for the MAME oracles (tools/pocket/mame_oracle.sh).
 """
 
 import argparse
@@ -154,7 +158,14 @@ def main():
     ap.add_argument("--dumpdir", default=os.path.join(REPO, "build", "mame", "regions"))
     ap.add_argument("--mame", default="mame")
     ap.add_argument("--no-mame", action="store_true", help="reuse existing region dumps")
+    ap.add_argument("--stage", action="store_true", help="only stage the files under build/mame/roms")
     a = ap.parse_args()
+
+    if a.stage:
+        index = build_rom.RomIndex(os.path.expanduser(a.zipdir))
+        for s in build_rom.expand_sets(a.set):
+            print(f"{s}: staged in {os.path.join(stage_rompath(s, index), s)}")
+        return 0
 
     all_ok = True
     index = None if a.no_mame else build_rom.RomIndex(os.path.expanduser(a.zipdir))
