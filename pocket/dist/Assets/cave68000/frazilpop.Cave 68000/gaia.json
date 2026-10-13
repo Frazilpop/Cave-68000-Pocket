@@ -1,0 +1,22 @@
+{
+    "instance": {
+        "magic": "APF_VER_1",
+        "core_select": {
+            "id": 0,
+            "select": false
+        },
+        "data_path": "",
+        "data_slots": [
+            {
+                "id": 1,
+                "filename": "gaia.rom"
+            }
+        ],
+        "memory_writes": [
+            {
+                "address": "0xF0000000",
+                "data": "0x00000006"
+            }
+        ]
+    }
+}

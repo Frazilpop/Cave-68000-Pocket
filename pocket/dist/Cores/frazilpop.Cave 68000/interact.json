@@ -1,0 +1,40 @@
+{
+    "interact": {
+        "magic": "APF_VER_1",
+        "variables": [
+            {
+                "name": "Test Mode",
+                "id": 15,
+                "type": "check",
+                "enabled": true,
+                "persist": false,
+                "address": "0xF1000000",
+                "defaultval": 0,
+                "value": "0x1",
+                "value_off": "0x0",
+                "mask": "0xFFFFFFFE"
+            },
+            {
+                "name": "Reset Game",
+                "id": 12,
+                "type": "action",
+                "enabled": true,
+                "address": "0xF100000C",
+                "value": 1
+            },
+            {
+                "name": "Diagnostic overlay",
+                "id": 14,
+                "type": "check",
+                "enabled": true,
+                "persist": false,
+                "address": "0xF1000014",
+                "defaultval": 0,
+                "value": "0x1",
+                "value_off": "0x0",
+                "mask": "0xFFFFFFFE"
+            }
+        ],
+        "messages": []
+    }
+}
