@@ -571,18 +571,38 @@ module cave68000 (
   );
 
   // ------------------------------------------------------------ VideoSys
-  // The timing registers stay at their reset values (320 x 240, upstream's
-  // porches). Gaia and Thunder Heroes show 224 lines: their MRAs programme
-  // 320 x 224 with other porches, to be given per game here.
+  // The timing registers: VideoSys's reset values (320 x 240, upstream's
+  // porches) for every game but Gaia Crusaders and Thunder Heroes, which
+  // show 224 lines. Upstream's MRAs programme those two through the prog
+  // port (0140 00e0 0024 0018 0014 0002: 320 x 224, front porch 36 x 24,
+  // retrace 20 x 2); the board writes the same six words after reset, in
+  // the port's byte order, then commits them.
+  reg  [2:0]  vprogStep;
+  reg  [15:0] vprogValue;
+  wire        vprogGaia = gameIndex == 4'd6;
+  always @(posedge clk)
+    if (rst)                    vprogStep <= 3'd0;
+    else if (vprogStep != 3'd7) vprogStep <= vprogStep + 3'd1;
+  always @* begin
+    case (vprogStep)
+      3'd0:    vprogValue = 16'h0140;
+      3'd1:    vprogValue = 16'h00e0;
+      3'd2:    vprogValue = 16'h0024;
+      3'd3:    vprogValue = 16'h0018;
+      3'd4:    vprogValue = 16'h0014;
+      default: vprogValue = 16'h0002;
+    endcase
+  end
+
   VideoSys videoSys (
     .clock                      (clk),
     .reset                      (rst),
     .io_videoClock              (clk_vid),
     .io_videoReset              (rst_vid),
-    .io_prog_video_wr           (1'b0),
-    .io_prog_video_addr         (27'd0),
-    .io_prog_video_din          (16'd0),
-    .io_prog_done               (1'b0),
+    .io_prog_video_wr           (vprogGaia && vprogStep < 3'd6),
+    .io_prog_video_addr         ({23'd0, vprogStep, 1'b0}),
+    .io_prog_video_din          ({vprogValue[7:0], vprogValue[15:8]}),
+    .io_prog_done               (vprogGaia && vprogStep == 3'd6),
     .io_options_offset_x        (4'd0),
     .io_options_offset_y        (4'd0),
     .io_options_compatibility   (1'b0),

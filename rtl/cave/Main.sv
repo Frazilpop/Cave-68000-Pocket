@@ -1677,8 +1677,12 @@ module Main(
   wire [23:0] _offset_T_17 = 24'(_GEN_241 - 24'h800000);
   wire        _GEN_242 = gameIsDFeveron & _GEN_1 & _offset_T_17 == 24'h4;
   wire        _GEN_243 = gameIsDFeveron & _GEN_1 & _offset_T_17 == 24'h6;
+  // The IRQ cause word: bit 2 is the vblank flag at offset 0 only and reads
+  // 0 at the other offsets, as cave.cpp's irq_cause_r returns it (upstream
+  // had it 1 there; the bus trace against MAME parts on it in ddonpach's
+  // first interrupt).
   wire [15:0] _GEN_244 =
-    {13'h0, ~(_offset_T_17 == 24'h0 & agalletIrq), ~unknownIrq, ~videoIrq};
+    {13'h0, (_offset_T_17 == 24'h0) & ~agalletIrq, ~unknownIrq, ~videoIrq};
   wire [15:0] _GEN_245 = _GEN_1 ? _GEN_244 : _GEN_240;
   wire        _GEN_246 = cs_21 & readStrobe;
   wire [15:0] _GEN_247 = _GEN_246 ? 16'h0 : _GEN_245;
@@ -1717,7 +1721,7 @@ module Main(
   wire        _GEN_277 =
     _GEN_275 ? ~(_offset_T_43 == 24'h6 | _GEN_243) & unknownIrq : ~_GEN_243 & unknownIrq;
   wire [15:0] _GEN_278 =
-    {13'h0, ~(_offset_T_43 == 24'h0 & agalletIrq), ~unknownIrq, ~videoIrq};
+    {13'h0, (_offset_T_43 == 24'h0) & ~agalletIrq, ~unknownIrq, ~videoIrq};
   wire [15:0] _GEN_279 = _GEN_30 ? _GEN_278 : _GEN_274;
   wire        _GEN_280 = cs_47 & readStrobe;
   wire [15:0] _GEN_281 = _GEN_280 ? 16'h0 : _GEN_279;
@@ -1751,7 +1755,7 @@ module Main(
   wire        _GEN_308 = gameIsDoDonPachi & _GEN_67 & _offset_T_70 == 24'h4;
   wire        _GEN_309 = gameIsDoDonPachi & _GEN_67 & _offset_T_70 == 24'h6;
   wire [15:0] _GEN_310 =
-    {13'h0, ~(_offset_T_70 == 24'h0 & agalletIrq), ~unknownIrq, ~videoIrq};
+    {13'h0, (_offset_T_70 == 24'h0) & ~agalletIrq, ~unknownIrq, ~videoIrq};
   wire [15:0] _GEN_311 = _GEN_67 ? _GEN_310 : _GEN_307;
   wire        _GEN_312 = cs_74 & readStrobe;
   wire [15:0] _GEN_313 = _GEN_312 ? 16'h0 : _GEN_311;
@@ -1795,7 +1799,7 @@ module Main(
   wire        _GEN_349 =
     _GEN_347 ? ~(_offset_T_100 == 24'h6 | _GEN_309) & _GEN_277 : ~_GEN_309 & _GEN_277;
   wire [15:0] _GEN_350 =
-    {13'h0, ~(_offset_T_100 == 24'h0 & agalletIrq), ~unknownIrq, ~videoIrq};
+    {13'h0, (_offset_T_100 == 24'h0) & ~agalletIrq, ~unknownIrq, ~videoIrq};
   wire        _GEN_351 = _GEN_110 | cs_104 & readStrobe;
   wire [15:0] _GEN_352 = _GEN_106 ? _GEN_350 : _GEN_346;
   wire [15:0] _GEN_353 = _GEN_351 ? 16'h0 : _GEN_352;
@@ -1819,7 +1823,7 @@ module Main(
   wire        _GEN_370 = gameIsGaia & _GEN_369 & _offset_T_132 == 24'h4;
   wire        _GEN_371 = gameIsGaia & _GEN_369 & _offset_T_132 == 24'h6;
   wire [15:0] _GEN_372 =
-    {13'h0, ~(_offset_T_132 == 24'h0 & agalletIrq), ~unknownIrq, ~videoIrq};
+    {13'h0, (_offset_T_132 == 24'h0) & ~agalletIrq, ~unknownIrq, ~videoIrq};
   wire        cs_136 = cpuByteAddr > 24'h800009 & cpuByteAddr < 24'h800080;
   wire        _GEN_373 = cs_136 & readStrobe;
   wire        _GEN_374 = cpuByteAddr > 24'hD0000F & cpuByteAddr < 24'hD00011 & readStrobe;
@@ -1839,7 +1843,7 @@ module Main(
   wire        _GEN_386 =
     _GEN_384 ? ~(_offset_T_148 == 24'h6 | _GEN_371) & _GEN_349 : ~_GEN_371 & _GEN_349;
   wire [15:0] _GEN_387 =
-    {13'h0, ~(_offset_T_148 == 24'h0 & agalletIrq), ~unknownIrq, ~videoIrq};
+    {13'h0, (_offset_T_148 == 24'h0) & ~agalletIrq, ~unknownIrq, ~videoIrq};
   wire        cs_152 = cpuByteAddr > 24'h300009 & cpuByteAddr < 24'h300080;
   wire        _GEN_388 = cpuByteAddr > 24'h30007F & cpuByteAddr < 24'h400000 & readStrobe;
   wire        _GEN_389 = _GEN_388 | cs_152 & readStrobe;
@@ -1871,7 +1875,7 @@ module Main(
   wire        _GEN_412 = gameIsHotdogStorm & _GEN_411 & _offset_T_200 == 24'h4;
   wire        _GEN_413 = gameIsHotdogStorm & _GEN_411 & _offset_T_200 == 24'h6;
   wire [15:0] _GEN_414 =
-    {13'h0, ~(_offset_T_200 == 24'h0 & agalletIrq), ~unknownIrq, ~videoIrq};
+    {13'h0, (_offset_T_200 == 24'h0) & ~agalletIrq, ~unknownIrq, ~videoIrq};
   wire        cs_204 = cpuByteAddr > 24'hA80009 & cpuByteAddr < 24'hA80080;
   wire        _GEN_415 = cs_204 & readStrobe;
   wire        _GEN_416 = cpuByteAddr > 24'hC7FFFF & cpuByteAddr < 24'hC80001 & readStrobe;
@@ -2229,7 +2233,7 @@ module Main(
           dinReg <= 16'h0;
         else if (_GEN_420)
           dinReg <=
-            {13'h0, ~(_offset_T_222 == 24'h0 & agalletIrq), ~unknownIrq, ~videoIrq};
+            {13'h0, (_offset_T_222 == 24'h0) & ~agalletIrq, ~unknownIrq, ~videoIrq};
         else if (cs_222 & readStrobe)
           dinReg <= tmp_37;
         else if (cs_221)
