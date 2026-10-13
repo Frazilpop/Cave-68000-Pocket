@@ -1,10 +1,30 @@
 // This file is a Codex-assisted rewrite based on the original work of
 // Josh Bassett (nullobject).
+//
+// Cave 68000 for Analogue Pocket: the register side redone to take writes as
+// MAME's ymz280b.cpp does (write_to_register), since the channels now play
+// as MAME's do (ChannelController): a key on starts a voice only on the
+// rising edge of its key bit with key-on enabled, a key off or the enable
+// cleared stops it, setting the enable again restarts the looping voices
+// still keyed on, and a mode of 0 reads as key off; and to tell a voice's end
+// when MAME does: its timer runs out just after the access that brought the
+// stream up to date, or at the sound manager's 20 ms update, and a key on or
+// off of the voice before then (or the enable cleared) cancels it. A write
+// that comes while the voices are being played waits for them, in a queue:
+// sample n is begun at (n + 1) / rate, so MAME, which brings the stream up
+// to floor(t * rate) first, has such a write land on sample n + 1, like one
+// made between samples; the ends are told after the queue is through. The
+// save-state ports are gone (the Pocket has no save states).
 
-// Yamaha YMZ280B register front-end and channel-controller wrapper.
-module YMZ280B(
+// Yamaha YMZ280B: the 68000's side, the voice registers and the status.
+module YMZ280B #(
+  parameter integer CLOCK_HZ = 32000000,  // the clock, a multiple of 100 Hz
+  parameter integer RATE16_INC = 2500,    // ChannelController's
+  parameter integer RATE16_DEN = CLOCK_HZ / 100 * 3
+) (
   input         clock,
   input         reset,
+  input         io_clock16m,          // the chip on 16 MHz (gaia, theroes), not 16.9344
   input         io_cpu_rd,
   input         io_cpu_wr,
   input         io_cpu_addr,
@@ -16,50 +36,55 @@ module YMZ280B(
   input         io_rom_wait_n,
   input         io_rom_valid,
   output        io_audio_valid,
-  output [15:0] io_audio_bits_left,
+  output [15:0] io_audio,
   output        io_irq,
-  input         io_ss_hold,
-  input         io_ss_restore_enable,
-  output        io_ss_idle,
-  cave_ssbus_if.slave io_ssbus
+  output        io_overrun            // a sample was not done when the next was due
 );
-  reg [7:0] addrReg;
-  reg [7:0] dataReg;
-  reg [7:0] statusReg;
-  reg [7:0] registerFile [0:127];
-  reg [7:0] irqMaskReg;
-  reg [7:0] controlReg;
+  reg [7:0]  addrReg;
+  reg [7:0]  dataReg;
+  reg [7:0]  statusReg;
+  reg [7:0]  irqMaskReg;
+  reg        irqEnableReg;
+  reg        keyOnEnableReg;
 
-  cave_ssbus_if saveStateOwners[3]();
+  // the voices, as MAME keeps them
+  reg [8:0]  fnum      [0:7];
+  reg [7:0]  level     [0:7];
+  reg [3:0]  pan       [0:7];
+  reg        looping   [0:7];
+  reg        keyOn     [0:7];
+  reg [23:0] startAddr [0:7];
+  reg [23:0] loopStart [0:7];
+  reg [23:0] loopEnd   [0:7];
+  reg [23:0] stopAddr  [0:7];
+  reg [7:0]  playing;
+  reg [7:0]  restart;               // keyed on, the channel not yet told
+  reg [7:0]  ended;                 // at their end, not yet told
+  reg        tellPending;           // an access or the 20 ms update, the ends not yet told
 
-  wire [1063:0] registerState;
-  wire          registerRestoreWr;
-  wire [31:0]   registerRestoreAddr;
-  wire [7:0]    registerRestoreData;
-  wire          channelControllerSsIdle;
+  // the data writes, in order, applied while the voices are not being played
+  reg [15:0] queue [0:7];
+  reg [2:0]  queueWr, queueRd;
+  reg [3:0]  queueCount;
+  wire       channelBusy;
+  wire       writeAddr  = io_cpu_wr & ~io_cpu_addr;
+  wire       writeData  = io_cpu_wr & io_cpu_addr;
+  wire       readStatus = io_cpu_rd & io_cpu_addr;
+  wire       access     = writeData | readStatus;
+  wire       update20;
 
-  genvar saveStateRegisterIndex;
-  generate
-    for (saveStateRegisterIndex = 0;
-         saveStateRegisterIndex < 128;
-         saveStateRegisterIndex = saveStateRegisterIndex + 1) begin : gen_save_state_register
-      assign registerState[(saveStateRegisterIndex * 8) +: 8] =
-        registerFile[saveStateRegisterIndex];
-    end
-  endgenerate
+  wire        apply  = !channelBusy && queueCount != 4'd0;
+  wire [7:0]  wReg   = queue[queueRd][15:8];
+  wire [7:0]  wData  = queue[queueRd][7:0];
+  wire        tell   = tellPending && !channelBusy && queueCount == 4'd0;
 
-  assign registerState[(128 * 8) +: 8] = addrReg;
-  assign registerState[(129 * 8) +: 8] = dataReg;
-  assign registerState[(130 * 8) +: 8] = statusReg;
-  assign registerState[(131 * 8) +: 8] = irqMaskReg;
-  assign registerState[(132 * 8) +: 8] = controlReg;
+  wire [2:0] v = wReg[4:2];
+  wire [7:0] keyData = (wData[6:5] == 2'd0) ? {1'b0, wData[6:0]} : wData;
 
-  wire        writeAddr = io_cpu_wr & ~io_cpu_addr;
-  wire        writeData = io_cpu_wr & io_cpu_addr;
-  wire        readStatus = io_cpu_rd & io_cpu_addr;
-
-  wire        channelDone;
-  wire [2:0] channelIndex;
+  wire       channelEnded;
+  wire [2:0] endedIndex;
+  wire       restartTaken;
+  wire [2:0] restartIndex;
 
   integer i;
   always @(posedge clock) begin
@@ -68,175 +93,138 @@ module YMZ280B(
       dataReg <= 8'h00;
       statusReg <= 8'h00;
       irqMaskReg <= 8'h00;
-      controlReg <= 8'h00;
-
-      for (i = 0; i < 128; i = i + 1)
-        registerFile[i] <= 8'h00;
-    end
-    else if (registerRestoreWr) begin
-      if (registerRestoreAddr < 32'd128)
-        registerFile[registerRestoreAddr[6:0]] <= registerRestoreData;
-      else begin
-        case (registerRestoreAddr)
-          32'd128: addrReg <= registerRestoreData;
-          32'd129: dataReg <= registerRestoreData;
-          32'd130: statusReg <= registerRestoreData;
-          32'd131: irqMaskReg <= registerRestoreData;
-          32'd132: controlReg <= registerRestoreData;
-          default: begin
-          end
-        endcase
+      irqEnableReg <= 1'b0;
+      keyOnEnableReg <= 1'b0;
+      playing <= 8'h00;
+      restart <= 8'h00;
+      ended <= 8'h00;
+      tellPending <= 1'b0;
+      queueWr <= 3'd0;
+      queueRd <= 3'd0;
+      queueCount <= 4'd0;
+      for (i = 0; i < 8; i = i + 1) begin
+        fnum[i] <= 9'd0;      level[i] <= 8'd0;     pan[i] <= 4'd0;
+        looping[i] <= 1'b0;   keyOn[i] <= 1'b0;
+        startAddr[i] <= 24'd0; loopStart[i] <= 24'd0;
+        loopEnd[i] <= 24'd0;   stopAddr[i] <= 24'd0;
       end
-    end
-    else begin
+    end else begin
+      // the channels: a voice taken back to its start, a voice at its end
+      // (which stops it unless it was keyed on again since)
+      if (restartTaken)
+        restart[restartIndex] <= 1'b0;
+      if (channelEnded && !restart[endedIndex])
+        playing[endedIndex] <= 1'b0;
+
+      // the ends found so far told after an access (and its write) or the
+      // 20 ms update
+      tellPending <= access || update20 || (tellPending && !tell);
+      ended <= (tell ? 8'h00 : ended) |
+               (channelEnded ? (8'h01 << endedIndex) : 8'h00);
+
       if (writeAddr)
         addrReg <= io_cpu_din;
 
       if (readStatus)
         dataReg <= statusReg;
-
-      if (readStatus)
-        statusReg <= 8'h00;
-      else if (channelDone)
-        statusReg <= statusReg | (8'h01 << channelIndex);
+      statusReg <= (readStatus ? 8'h00 : statusReg) | (tell ? ended : 8'h00);
 
       if (writeData) begin
-        if (~addrReg[7])
-          registerFile[addrReg[6:0]] <= io_cpu_din;
-        else if (addrReg == 8'hFE)
-          irqMaskReg <= io_cpu_din;
-        else if (addrReg == 8'hFF)
-          controlReg <= io_cpu_din;
+        queue[queueWr] <= {addrReg, io_cpu_din};
+        queueWr <= queueWr + 3'd1;
+      end
+      if (apply)
+        queueRd <= queueRd + 3'd1;
+      queueCount <= queueCount + {3'd0, writeData} - {3'd0, apply};
+
+      if (apply) begin
+        if (~wReg[7]) begin
+          case ({wReg[6:5], wReg[1:0]})
+            4'b00_00: fnum[v][7:0] <= wData;
+            4'b00_01: begin
+              fnum[v][8] <= wData[0];
+              looping[v] <= wData[4];
+              keyOn[v] <= keyData[7];
+              if (!keyOn[v] && keyData[7] && keyOnEnableReg) begin
+                playing[v] <= 1'b1;
+                restart[v] <= 1'b1;
+                ended[v] <= 1'b0;
+              end else if (keyOn[v] && !keyData[7]) begin
+                playing[v] <= 1'b0;
+                ended[v] <= 1'b0;
+              end
+            end
+            4'b00_10: level[v] <= wData;
+            4'b00_11: pan[v] <= wData[3:0];
+            4'b01_00: startAddr[v][23:16] <= wData;
+            4'b01_01: loopStart[v][23:16] <= wData;
+            4'b01_10: loopEnd[v][23:16]   <= wData;
+            4'b01_11: stopAddr[v][23:16]  <= wData;
+            4'b10_00: startAddr[v][15:8]  <= wData;
+            4'b10_01: loopStart[v][15:8]  <= wData;
+            4'b10_10: loopEnd[v][15:8]    <= wData;
+            4'b10_11: stopAddr[v][15:8]   <= wData;
+            4'b11_00: startAddr[v][7:0]   <= wData;
+            4'b11_01: loopStart[v][7:0]   <= wData;
+            4'b11_10: loopEnd[v][7:0]     <= wData;
+            4'b11_11: stopAddr[v][7:0]    <= wData;
+          endcase
+        end else if (wReg == 8'hFE)
+          irqMaskReg <= wData;
+        else if (wReg == 8'hFF) begin
+          irqEnableReg <= wData[4];
+          keyOnEnableReg <= wData[7];
+          if (keyOnEnableReg && !wData[7]) begin
+            playing <= 8'h00;
+            ended <= 8'h00;
+          end
+          else if (!keyOnEnableReg && wData[7])
+            for (i = 0; i < 8; i = i + 1)
+              if (keyOn[i] && looping[i])
+                playing[i] <= 1'b1;
+        end
       end
     end
   end
 
-  CaveSaveStateBusMux #(.COUNT(3)) saveStateBusMux (
-    .clk    (clock),
-    .owners (saveStateOwners),
-    .stream (io_ssbus)
-  );
-
-  CaveSaveStateRegisterPort #(
-    .WIDTH        (8),
-    .COUNT        (133),
-    .SS_IDX       (8'd29),
-    .STREAM_WIDTH (2'd0)
-  ) registerSaveState (
-    .clk            (clock),
+  // what the channel controller reads of the voice it is on
+  wire [2:0] ch;
+  ChannelController #(
+    .CLOCK_HZ (CLOCK_HZ), .RATE16_INC (RATE16_INC), .RATE16_DEN (RATE16_DEN)
+  ) channelCtrl (
+    .clock          (clock),
     .reset          (reset),
-    .state_enable   (io_ss_hold & io_ss_idle),
-    .restore_enable (io_ss_restore_enable),
-    .capture_data   (registerState),
-    .restore_wr     (registerRestoreWr),
-    .restore_addr   (registerRestoreAddr),
-    .restore_data   (registerRestoreData),
-    .blocked_access (),
-    .ssbus          (saveStateOwners[0])
-  );
-
-  ChannelController channelCtrl (
-    .clock                   (clock),
-    .reset                   (reset),
-
-    .io_regs_0_pitch         (registerFile[7'h00]),
-    .io_regs_0_flags_keyOn   (registerFile[7'h01][7]),
-    .io_regs_0_flags_loop    (registerFile[7'h01][4]),
-    .io_regs_0_level         (registerFile[7'h02]),
-    .io_regs_0_pan           (registerFile[7'h03][3:0]),
-    .io_regs_0_startAddr     ({registerFile[7'h20], registerFile[7'h40], registerFile[7'h60]}),
-    .io_regs_0_loopStartAddr ({registerFile[7'h21], registerFile[7'h41], registerFile[7'h61]}),
-    .io_regs_0_loopEndAddr   ({registerFile[7'h22], registerFile[7'h42], registerFile[7'h62]}),
-    .io_regs_0_endAddr       ({registerFile[7'h23], registerFile[7'h43], registerFile[7'h63]}),
-
-    .io_regs_1_pitch         (registerFile[7'h04]),
-    .io_regs_1_flags_keyOn   (registerFile[7'h05][7]),
-    .io_regs_1_flags_loop    (registerFile[7'h05][4]),
-    .io_regs_1_level         (registerFile[7'h06]),
-    .io_regs_1_pan           (registerFile[7'h07][3:0]),
-    .io_regs_1_startAddr     ({registerFile[7'h24], registerFile[7'h44], registerFile[7'h64]}),
-    .io_regs_1_loopStartAddr ({registerFile[7'h25], registerFile[7'h45], registerFile[7'h65]}),
-    .io_regs_1_loopEndAddr   ({registerFile[7'h26], registerFile[7'h46], registerFile[7'h66]}),
-    .io_regs_1_endAddr       ({registerFile[7'h27], registerFile[7'h47], registerFile[7'h67]}),
-
-    .io_regs_2_pitch         (registerFile[7'h08]),
-    .io_regs_2_flags_keyOn   (registerFile[7'h09][7]),
-    .io_regs_2_flags_loop    (registerFile[7'h09][4]),
-    .io_regs_2_level         (registerFile[7'h0A]),
-    .io_regs_2_pan           (registerFile[7'h0B][3:0]),
-    .io_regs_2_startAddr     ({registerFile[7'h28], registerFile[7'h48], registerFile[7'h68]}),
-    .io_regs_2_loopStartAddr ({registerFile[7'h29], registerFile[7'h49], registerFile[7'h69]}),
-    .io_regs_2_loopEndAddr   ({registerFile[7'h2A], registerFile[7'h4A], registerFile[7'h6A]}),
-    .io_regs_2_endAddr       ({registerFile[7'h2B], registerFile[7'h4B], registerFile[7'h6B]}),
-
-    .io_regs_3_pitch         (registerFile[7'h0C]),
-    .io_regs_3_flags_keyOn   (registerFile[7'h0D][7]),
-    .io_regs_3_flags_loop    (registerFile[7'h0D][4]),
-    .io_regs_3_level         (registerFile[7'h0E]),
-    .io_regs_3_pan           (registerFile[7'h0F][3:0]),
-    .io_regs_3_startAddr     ({registerFile[7'h2C], registerFile[7'h4C], registerFile[7'h6C]}),
-    .io_regs_3_loopStartAddr ({registerFile[7'h2D], registerFile[7'h4D], registerFile[7'h6D]}),
-    .io_regs_3_loopEndAddr   ({registerFile[7'h2E], registerFile[7'h4E], registerFile[7'h6E]}),
-    .io_regs_3_endAddr       ({registerFile[7'h2F], registerFile[7'h4F], registerFile[7'h6F]}),
-
-    .io_regs_4_pitch         (registerFile[7'h10]),
-    .io_regs_4_flags_keyOn   (registerFile[7'h11][7]),
-    .io_regs_4_flags_loop    (registerFile[7'h11][4]),
-    .io_regs_4_level         (registerFile[7'h12]),
-    .io_regs_4_pan           (registerFile[7'h13][3:0]),
-    .io_regs_4_startAddr     ({registerFile[7'h30], registerFile[7'h50], registerFile[7'h70]}),
-    .io_regs_4_loopStartAddr ({registerFile[7'h31], registerFile[7'h51], registerFile[7'h71]}),
-    .io_regs_4_loopEndAddr   ({registerFile[7'h32], registerFile[7'h52], registerFile[7'h72]}),
-    .io_regs_4_endAddr       ({registerFile[7'h33], registerFile[7'h53], registerFile[7'h73]}),
-
-    .io_regs_5_pitch         (registerFile[7'h14]),
-    .io_regs_5_flags_keyOn   (registerFile[7'h15][7]),
-    .io_regs_5_flags_loop    (registerFile[7'h15][4]),
-    .io_regs_5_level         (registerFile[7'h16]),
-    .io_regs_5_pan           (registerFile[7'h17][3:0]),
-    .io_regs_5_startAddr     ({registerFile[7'h34], registerFile[7'h54], registerFile[7'h74]}),
-    .io_regs_5_loopStartAddr ({registerFile[7'h35], registerFile[7'h55], registerFile[7'h75]}),
-    .io_regs_5_loopEndAddr   ({registerFile[7'h36], registerFile[7'h56], registerFile[7'h76]}),
-    .io_regs_5_endAddr       ({registerFile[7'h37], registerFile[7'h57], registerFile[7'h77]}),
-
-    .io_regs_6_pitch         (registerFile[7'h18]),
-    .io_regs_6_flags_keyOn   (registerFile[7'h19][7]),
-    .io_regs_6_flags_loop    (registerFile[7'h19][4]),
-    .io_regs_6_level         (registerFile[7'h1A]),
-    .io_regs_6_pan           (registerFile[7'h1B][3:0]),
-    .io_regs_6_startAddr     ({registerFile[7'h38], registerFile[7'h58], registerFile[7'h78]}),
-    .io_regs_6_loopStartAddr ({registerFile[7'h39], registerFile[7'h59], registerFile[7'h79]}),
-    .io_regs_6_loopEndAddr   ({registerFile[7'h3A], registerFile[7'h5A], registerFile[7'h7A]}),
-    .io_regs_6_endAddr       ({registerFile[7'h3B], registerFile[7'h5B], registerFile[7'h7B]}),
-
-    .io_regs_7_pitch         (registerFile[7'h1C]),
-    .io_regs_7_flags_keyOn   (registerFile[7'h1D][7]),
-    .io_regs_7_flags_loop    (registerFile[7'h1D][4]),
-    .io_regs_7_level         (registerFile[7'h1E]),
-    .io_regs_7_pan           (registerFile[7'h1F][3:0]),
-    .io_regs_7_startAddr     ({registerFile[7'h3C], registerFile[7'h5C], registerFile[7'h7C]}),
-    .io_regs_7_loopStartAddr ({registerFile[7'h3D], registerFile[7'h5D], registerFile[7'h7D]}),
-    .io_regs_7_loopEndAddr   ({registerFile[7'h3E], registerFile[7'h5E], registerFile[7'h7E]}),
-    .io_regs_7_endAddr       ({registerFile[7'h3F], registerFile[7'h5F], registerFile[7'h7F]}),
-
-    .io_enable               (controlReg[7]),
-    .io_done                 (channelDone),
-    .io_index                (channelIndex),
-    .io_audio_valid          (io_audio_valid),
-    .io_audio_bits_left      (io_audio_bits_left),
-    .io_rom_rd               (io_rom_rd),
-    .io_rom_addr             (io_rom_addr),
-    .io_rom_dout             (io_rom_dout),
-    .io_rom_wait_n           (io_rom_wait_n),
-    .io_rom_valid            (io_rom_valid),
-    .io_ss_hold              (io_ss_hold),
-    .io_ss_restore_enable    (io_ss_restore_enable),
-    .io_ss_idle              (channelControllerSsIdle),
-    .io_ss_channel_bus       (saveStateOwners[1]),
-    .io_ss_scheduler_bus     (saveStateOwners[2])
+    .io_clock16m    (io_clock16m),
+    .io_access      (access),
+    .io_update      (update20),
+    .io_hold        (queueCount != 4'd0),
+    .io_busy        (channelBusy),
+    .io_index       (ch),
+    .io_fnum        (fnum[ch]),
+    .io_level       (level[ch]),
+    .io_pan         (pan[ch]),
+    .io_looping     (looping[ch]),
+    .io_keyOn       (keyOn[ch]),
+    .io_playing     (playing[ch]),
+    .io_restart     (restart[ch]),
+    .io_startAddr   (startAddr[ch]),
+    .io_loopStart   (loopStart[ch]),
+    .io_loopEnd     (loopEnd[ch]),
+    .io_stopAddr    (stopAddr[ch]),
+    .io_restartTaken(restartTaken),
+    .io_restartIndex(restartIndex),
+    .io_ended       (channelEnded),
+    .io_endedIndex  (endedIndex),
+    .io_audio_valid (io_audio_valid),
+    .io_audio       (io_audio),
+    .io_overrun     (io_overrun),
+    .io_rom_rd      (io_rom_rd),
+    .io_rom_addr    (io_rom_addr),
+    .io_rom_dout    (io_rom_dout),
+    .io_rom_wait_n  (io_rom_wait_n),
+    .io_rom_valid   (io_rom_valid)
   );
 
   assign io_cpu_dout = dataReg;
-  assign io_irq = controlReg[4] & (|(statusReg & irqMaskReg));
-  assign io_ss_idle = channelControllerSsIdle;
+  assign io_irq = irqEnableReg & (|(statusReg & irqMaskReg));
 endmodule

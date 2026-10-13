@@ -50,8 +50,6 @@ set_global_assignment -name SYSTEMVERILOG_FILE cave_fit_top.sv
 
 # the board (keep in step with sim/ddonpach/build.sh and pocket/src/fpga/board.qip)
 set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/top/cave68000.sv
-set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/cave/AudioMixer.sv
-set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/cave/AudioPipeline.sv
 set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/cave/CaveAsyncMemArbiters.sv
 set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/cave/CaveBoardProfile.sv
 set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/cave/CaveBurstBuffers.sv
@@ -76,7 +74,6 @@ set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/cave/CaveSyncReadMem.sv
 set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/cave/CaveTileRomClockCrossing.sv
 set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/cave/CaveTrueDualPortRam.sv
 set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/cave/CaveVideoTiming.sv
-set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/cave/CaveYMZ280BHelpers.sv
 set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/cave/ChannelController.sv
 set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/cave/ColorMixer.sv
 set_global_assignment -name SYSTEMVERILOG_FILE ../../rtl/cave/EEPROM.sv

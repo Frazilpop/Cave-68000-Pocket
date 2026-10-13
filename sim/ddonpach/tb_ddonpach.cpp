@@ -4,7 +4,7 @@
 //   tb_ddonpach <set.rom> <game id> <frames> <outdir> [dump frames, comma list]
 //          [--rom-lat N] [--spr-lat N] [--fb-lat N] [--all-frames]
 //          [--trace file] [--trace-count N] [--trace-data-only]
-//          [--prog file --replay N]
+//          [--prog file --replay N] [--wav file] [--ymz-log file]
 //
 // Hosts cave68000 (through sim/ddonpach/cave68000_sim.sv, which adds the
 // region offsets and upstream's DDR burst bookkeeping) with behavioural
@@ -44,6 +44,15 @@
 // frame_N.ppm, with the sprite layer on screen in it as sprites_N.bin
 // (320 x 240 little-endian u16, priority << 14 | colour << 8 | pen, 0 =
 // transparent, as the dump's sprite_bitmap.bin). <frames> is then a limit.
+//
+// --wav writes the sound, one sample per snd_sample (mono, 16-bit, at the
+// chip's clock / 192 as MAME keeps it: 88200 Hz, 83333 on gaia). --ymz-log
+// writes what the 68000 told the YMZ280B in tools/mame_cave_ymz.lua's
+// format, with each access's time put in the middle of the sample it lands
+// on – the next one begun (a write made while one is being worked on waits
+// for it; '+' marks those) – so sim/ymz280b's model can play the board's
+// own run back (model_vs_mame --true-rate). stats.csv gains the most clk_cpu clocks a sample
+// took that frame (of 362.8) and the samples that came late.
 
 #include "Vcave68000_sim.h"
 #include "verilated.h"
@@ -55,6 +64,7 @@
 #include <string>
 #include <vector>
 #include <set>
+#include <algorithm>
 #include <sys/stat.h>
 
 int main(int argc, char** argv) {
@@ -75,6 +85,8 @@ int main(int argc, char** argv) {
     bool trace_data_only = false;
     const char* prog_path = nullptr;
     int replay = -1;
+    const char* wav_path = nullptr;
+    const char* ymz_log_path = nullptr;
     for (int i = 5; i < argc; i++) {
         if (!strcmp(argv[i], "--rom-lat") && i + 1 < argc)          rom_lat = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--spr-lat") && i + 1 < argc)     spr_lat = atoi(argv[++i]);
@@ -85,6 +97,8 @@ int main(int argc, char** argv) {
         else if (!strcmp(argv[i], "--trace-data-only"))              trace_data_only = true;
         else if (!strcmp(argv[i], "--prog") && i + 1 < argc)        prog_path = argv[++i];
         else if (!strcmp(argv[i], "--replay") && i + 1 < argc)      replay = atoi(argv[++i]);
+        else if (!strcmp(argv[i], "--wav") && i + 1 < argc)         wav_path = argv[++i];
+        else if (!strcmp(argv[i], "--ymz-log") && i + 1 < argc)     ymz_log_path = argv[++i];
         else {
             std::string s = argv[i];
             size_t p = 0;
@@ -190,7 +204,19 @@ int main(int argc, char** argv) {
     int x = 0, y = 0, frame = 1;
     int prev_hb = 1, prev_vb = 1;
     FILE* stats = fopen((outdir + "/stats.csv").c_str(), "w");
-    fprintf(stats, "frame,cycles,bus_cycles,max_wait,max_wait_addr,irqs,swaps,spr_bursts,fb_rd_bursts,fb_wr_beats\n");
+    fprintf(stats, "frame,cycles,bus_cycles,max_wait,max_wait_addr,irqs,swaps,spr_bursts,fb_rd_bursts,fb_wr_beats,snd_max_clocks,snd_late\n");
+
+    // ------------------------------------------------------------- sound
+    // the board's true rate for the log's times; MAME's whole one in the WAV
+    const double snd_rate = game == 6 ? 16000000.0 / 192.0 : 88200.0;
+    std::vector<int16_t> wav;
+    FILE* ymz_log = ymz_log_path ? fopen(ymz_log_path, "w") : nullptr;
+    if (ymz_log) fprintf(ymz_log, "# the board, game %d\n", game);
+    long snd_started = 0;               // samples begun
+    uint64_t snd_begin = 0, snd_max_f = 0, snd_late_f = 0, snd_late = 0;
+    bool snd_busy_prev = false, ymz_wr_prev = false, ymz_rd_prev = false;
+    bool ymz_read_pending = false; long ymz_read_at = 0; bool ymz_read_mid = false;
+    uint8_t ymz_reg = 0;
 
     // ------------------------------------------------------------- monitors
     FILE* trace = trace_path ? fopen(trace_path, "w") : nullptr;
@@ -318,6 +344,35 @@ int main(int argc, char** argv) {
             bool sw = t->dbg_sprite_swap;
             if (sw && !swap_prev) swap_f++;
             swap_prev = sw;
+
+            // the sound: a sample out and the next begun at each snd_sample
+            if (ymz_read_pending) {      // the status a read latched, the clock after
+                fprintf(ymz_log, "%.12f S %02x%s\n", (ymz_read_at + 0.5) / snd_rate, t->dbg_ymz_dout,
+                        ymz_read_mid ? " +" : "");
+                ymz_read_pending = false;
+            }
+            if (t->snd_sample) {
+                if (snd_started > 0) wav.push_back((int16_t)t->snd);
+                snd_started++;
+                snd_begin = cyc;
+            }
+            if (t->snd_overrun) { snd_late_f++; snd_late++; }
+            bool sb = t->dbg_ymz_busy;
+            if (snd_busy_prev && !sb) snd_max_f = std::max<uint64_t>(snd_max_f, (cyc - snd_begin) / 3);
+            snd_busy_prev = sb;
+            if (ymz_log) {
+                bool mid = sb;
+                if (t->dbg_ymz_wr && !ymz_wr_prev) {
+                    if (!t->dbg_ymz_a0) ymz_reg = t->dbg_ymz_din;
+                    else fprintf(ymz_log, "%.12f W %02x %02x%s\n", (snd_started + 0.5) / snd_rate, ymz_reg,
+                                 t->dbg_ymz_din, mid ? " +" : "");
+                }
+                if (t->dbg_ymz_rd && !ymz_rd_prev && t->dbg_ymz_a0) {
+                    ymz_read_pending = true; ymz_read_at = snd_started; ymz_read_mid = mid;
+                }
+            }
+            ymz_wr_prev = t->dbg_ymz_wr;
+            ymz_rd_prev = t->dbg_ymz_rd;
         }
 
         // ---- video capture, at each clk_vid edge
@@ -362,13 +417,16 @@ int main(int argc, char** argv) {
                     fwrite(img.data(), 1, img.size(), f);
                     fclose(f);
                 }
-                fprintf(stats, "%d,%llu,%llu,%llu,%06x,%llu,%llu,%llu,%llu,%llu\n", frame,
+                fprintf(stats, "%d,%llu,%llu,%llu,%06x,%llu,%llu,%llu,%llu,%llu,%llu,%llu\n", frame,
                         (unsigned long long)cyc, (unsigned long long)bus_f,
                         (unsigned long long)max_wait, max_wait_addr,
                         (unsigned long long)irq_f, (unsigned long long)swap_f,
-                        (unsigned long long)sprb_f, (unsigned long long)fbr_f, (unsigned long long)fbw_f);
+                        (unsigned long long)sprb_f, (unsigned long long)fbr_f, (unsigned long long)fbw_f,
+                        (unsigned long long)snd_max_f, (unsigned long long)snd_late_f);
                 fflush(stats);
+                if (ymz_log) fprintf(ymz_log, "# frame %d %.12f\n", frame, (snd_started + 0.5) / snd_rate);
                 bus_f = irq_f = swap_f = sprb_f = fbr_f = fbw_f = 0;
+                snd_max_f = snd_late_f = 0;
                 max_wait = 0; max_wait_addr = 0;
                 if (frame % 10 == 0) fprintf(stderr, "frame %d  cycles %llu\n", frame, (unsigned long long)cyc);
                 frame++;
@@ -381,6 +439,21 @@ int main(int argc, char** argv) {
 
     if (trace) fclose(trace);
     fclose(stats);
+    if (ymz_log) fclose(ymz_log);
+    if (wav_path) {
+        FILE* f = fopen(wav_path, "wb");
+        if (!f) { perror(wav_path); return 1; }
+        auto u32 = [&](uint32_t v) { fwrite(&v, 4, 1, f); };
+        auto u16 = [&](uint16_t v) { fwrite(&v, 2, 1, f); };
+        uint32_t bytes = wav.size() * 2, rate = (uint32_t)snd_rate;
+        fwrite("RIFF", 1, 4, f); u32(36 + bytes); fwrite("WAVEfmt ", 1, 8, f);
+        u32(16); u16(1); u16(1); u32(rate); u32(rate * 2); u16(2); u16(16);
+        fwrite("data", 1, 4, f); u32(bytes);
+        fwrite(wav.data(), 2, wav.size(), f);
+        fclose(f);
+    }
+    if (snd_started > 0)
+        fprintf(stderr, "sound: %ld samples, %llu late\n", snd_started, (unsigned long long)snd_late);
     if (replay >= 0 && !replay_done) {
         fprintf(stderr, loaded_frame < 0 ? "the loader never finished\n" : "ran out of frames\n");
         return 1;

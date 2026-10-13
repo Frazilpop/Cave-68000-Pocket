@@ -9,8 +9,9 @@
 //   * upstream's DDR.sv burst bookkeeping in front of the sprite tile and
 //     frame buffer ports (sim_ddr_port below): burstDone with the last beat,
 //     combinationally on a write as MiSTer's bridge gave it;
-//   * the 68000's bus, taken by hierarchical reference for the trace, and
-//     the sprite frame buffer's page on screen, for --replay.
+//   * the 68000's bus, taken by hierarchical reference for the trace, the
+//     sprite frame buffer's page on screen, for --replay, and the YMZ280B's
+//     68000 side and whether it is working on a sample, for --ymz-log.
 //
 // The memories themselves are the C++ side's (tb_ddonpach.cpp).
 
@@ -119,6 +120,7 @@ module cave68000_sim (
   output wire        ce_pix, hs, vs, hblank, vblank, de,
   output wire [7:0]  r, g, b,
   output wire [15:0] snd,
+  output wire        snd_sample, snd_overrun,
 
   // the 68000's bus
   output wire        dbg_as, dbg_rw, dbg_uds, dbg_lds, dbg_dtack,
@@ -127,7 +129,9 @@ module cave68000_sim (
   output wire [15:0] dbg_din, dbg_dout,
   output wire [2:0]  dbg_ipl,
   output wire        dbg_sprite_swap,
-  output wire [1:0]  dbg_fb_read_page   // the sprite frame buffer page on screen
+  output wire [1:0]  dbg_fb_read_page,  // the sprite frame buffer page on screen
+  output wire        dbg_ymz_rd, dbg_ymz_wr, dbg_ymz_a0, dbg_ymz_busy,
+  output wire [7:0]  dbg_ymz_din, dbg_ymz_dout
 );
   wire [31:0] off_snd, off_l0, off_l1, off_l2, off_spr;
   CaveGameConfig cfg (
@@ -190,7 +194,7 @@ module cave68000_sim (
     .ee_rd (ee_rd), .ee_wr (ee_wr), .ee_addr (ee_addr), .ee_din (ee_din),
     .ee_dout (ee_dout), .ee_wait_n (ee_wait_n), .ee_valid (ee_valid),
     .ce_pix (ce_pix), .hs (hs), .vs (vs), .hblank (hblank), .vblank (vblank), .de (de),
-    .r (r), .g (g), .b (b), .snd (snd)
+    .r (r), .g (g), .b (b), .snd (snd), .snd_sample (snd_sample), .snd_overrun (snd_overrun)
   );
 
   assign dbg_as    = dut.main._cpu_io_as;
@@ -205,6 +209,12 @@ module cave68000_sim (
   assign dbg_ipl   = dut.main._cpu_io_ipl;
   assign dbg_sprite_swap = dut._main_io_spriteFrameBufferSwap;
   assign dbg_fb_read_page = dut.spriteFrameBuffer.pageFlipper.read_index;
+  assign dbg_ymz_rd   = dut._main_io_soundCtrl_ymz_rd;
+  assign dbg_ymz_wr   = dut._main_io_soundCtrl_ymz_wr;
+  assign dbg_ymz_a0   = dut._main_io_soundCtrl_ymz_addr[0];
+  assign dbg_ymz_din  = dut._main_io_soundCtrl_ymz_din[7:0];
+  assign dbg_ymz_dout = dut._main_io_soundCtrl_ymz_dout[7:0];
+  assign dbg_ymz_busy = dut.sound.ymz280b.channelCtrl.state != 4'd0;
 endmodule
 
 `default_nettype wire

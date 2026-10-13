@@ -1,654 +1,409 @@
 // This file is a Codex-assisted rewrite based on the original work of
 // Josh Bassett (nullobject).
+//
+// Cave 68000 for Analogue Pocket: rewritten to play the voices as MAME's
+// ymz280b.cpp does, sample for sample, since upstream's differed from it in
+// the loop and end points (taken one byte late), the ADPCM rounding, a key
+// on (which cleared the interpolation), the level ((level + 1) / 512 against
+// MAME's level / 256) and the pan; and to keep the output rate exact (the
+// chip's clock / 192, by a fractional counter, for either chip clock) where
+// upstream divided its clock by 363. Upstream's AudioPipeline, AudioMixer
+// and the save-state ports are gone.
 
-// YMZ280B channel scheduler and ADPCM stream state manager.
-module ChannelController(
+// YMZ280B: the eight voices, one after another, once per output sample.
+//
+// MAME plays the chip in stream updates: one before every register write
+// and status read the 68000 makes (a register select is not one) and one
+// every 20 ms of machine time from the sound manager. Three things happen
+// only at an update's start or end, so the board keeps the same points (an
+// access marks the next sample begun – a write made while the voices are
+// being played waits for them, YMZ280B.sv – and the 20 ms count from reset
+// the next sample after it):
+//
+//   * a voice found not playing with its last two samples zero at an
+//     update's start is silent until the next, its interpolation point back
+//     at 1 (so a key on starts afresh); one that falls silent within an
+//     update goes on being stepped through zeros;
+//   * after a sample's end, the samples taken are the last one times 15/16,
+//     again and again (MAME's ramp to zero), to the end of the update; then
+//     zeros;
+//   * the end is told (the status bit, the IRQ) just after the access that
+//     ended the update and its write, or at the 20 ms update (io_update;
+//     YMZ280B.sv).
+//
+// Per voice and sample, as MAME's sound_stream_update:
+//
+//   * unless silent, the output is prev + (curr - prev) * pos / 512 and pos
+//     advances by fnum + 1; when it passes 512 the next sample is taken –
+//     decoded from the ROM while the voice plays, else 0, or the ramp – and,
+//     when the point was at 1 already, the taking comes first;
+//   * the output, times the left and the right level (MAME's update_volumes)
+//     and halved, is added to the sample. The sum over the voices and both
+//     sides, divided by 256, is the mono speaker MAME mixes (16 bits).
+//
+// The 4-bit ADPCM as MAME decodes it: positions count nibbles, high nibble
+// first; the loop start is remembered the first time through, the loop end
+// and the end are exclusive, and the loop is taken only while keyed on. The
+// 8- and 16-bit PCM modes play as ADPCM (no game of this board uses them).
+module ChannelController #(
+  parameter integer CLOCK_HZ = 32000000,
+  // the 16 MHz chip's rate as RATE16_INC / RATE16_DEN a clock: by default
+  // 83333.3 Hz; sim/ymz280b sets MAME's whole 83333 to hold gaia to MAME's
+  // 20 ms updates sample for sample
+  parameter integer RATE16_INC = 2500,
+  parameter integer RATE16_DEN = CLOCK_HZ / 100 * 3
+) (
   input         clock,
   input         reset,
-  input  [7:0]  io_regs_0_pitch,
-  input         io_regs_0_flags_keyOn,
-  input         io_regs_0_flags_loop,
-  input  [7:0]  io_regs_0_level,
-  input  [3:0]  io_regs_0_pan,
-  input  [23:0] io_regs_0_startAddr,
-  input  [23:0] io_regs_0_loopStartAddr,
-  input  [23:0] io_regs_0_loopEndAddr,
-  input  [23:0] io_regs_0_endAddr,
-  input  [7:0]  io_regs_1_pitch,
-  input         io_regs_1_flags_keyOn,
-  input         io_regs_1_flags_loop,
-  input  [7:0]  io_regs_1_level,
-  input  [3:0]  io_regs_1_pan,
-  input  [23:0] io_regs_1_startAddr,
-  input  [23:0] io_regs_1_loopStartAddr,
-  input  [23:0] io_regs_1_loopEndAddr,
-  input  [23:0] io_regs_1_endAddr,
-  input  [7:0]  io_regs_2_pitch,
-  input         io_regs_2_flags_keyOn,
-  input         io_regs_2_flags_loop,
-  input  [7:0]  io_regs_2_level,
-  input  [3:0]  io_regs_2_pan,
-  input  [23:0] io_regs_2_startAddr,
-  input  [23:0] io_regs_2_loopStartAddr,
-  input  [23:0] io_regs_2_loopEndAddr,
-  input  [23:0] io_regs_2_endAddr,
-  input  [7:0]  io_regs_3_pitch,
-  input         io_regs_3_flags_keyOn,
-  input         io_regs_3_flags_loop,
-  input  [7:0]  io_regs_3_level,
-  input  [3:0]  io_regs_3_pan,
-  input  [23:0] io_regs_3_startAddr,
-  input  [23:0] io_regs_3_loopStartAddr,
-  input  [23:0] io_regs_3_loopEndAddr,
-  input  [23:0] io_regs_3_endAddr,
-  input  [7:0]  io_regs_4_pitch,
-  input         io_regs_4_flags_keyOn,
-  input         io_regs_4_flags_loop,
-  input  [7:0]  io_regs_4_level,
-  input  [3:0]  io_regs_4_pan,
-  input  [23:0] io_regs_4_startAddr,
-  input  [23:0] io_regs_4_loopStartAddr,
-  input  [23:0] io_regs_4_loopEndAddr,
-  input  [23:0] io_regs_4_endAddr,
-  input  [7:0]  io_regs_5_pitch,
-  input         io_regs_5_flags_keyOn,
-  input         io_regs_5_flags_loop,
-  input  [7:0]  io_regs_5_level,
-  input  [3:0]  io_regs_5_pan,
-  input  [23:0] io_regs_5_startAddr,
-  input  [23:0] io_regs_5_loopStartAddr,
-  input  [23:0] io_regs_5_loopEndAddr,
-  input  [23:0] io_regs_5_endAddr,
-  input  [7:0]  io_regs_6_pitch,
-  input         io_regs_6_flags_keyOn,
-  input         io_regs_6_flags_loop,
-  input  [7:0]  io_regs_6_level,
-  input  [3:0]  io_regs_6_pan,
-  input  [23:0] io_regs_6_startAddr,
-  input  [23:0] io_regs_6_loopStartAddr,
-  input  [23:0] io_regs_6_loopEndAddr,
-  input  [23:0] io_regs_6_endAddr,
-  input  [7:0]  io_regs_7_pitch,
-  input         io_regs_7_flags_keyOn,
-  input         io_regs_7_flags_loop,
-  input  [7:0]  io_regs_7_level,
-  input  [3:0]  io_regs_7_pan,
-  input  [23:0] io_regs_7_startAddr,
-  input  [23:0] io_regs_7_loopStartAddr,
-  input  [23:0] io_regs_7_loopEndAddr,
-  input  [23:0] io_regs_7_endAddr,
-  input         io_enable,
-  output        io_done,
-  output [2:0]  io_index,
+  input         io_clock16m,
+  input         io_access,         // a register write or status read: MAME's update
+  output        io_update,         // MAME's 20 ms update
+  input         io_hold,           // writes waiting: begin no sample
+  output        io_busy,           // the voices being played
+  output [2:0]  io_index,          // the voice whose registers are read
+  input  [8:0]  io_fnum,
+  input  [7:0]  io_level,
+  input  [3:0]  io_pan,
+  input         io_looping,
+  input         io_keyOn,
+  input         io_playing,
+  input         io_restart,
+  input  [23:0] io_startAddr,
+  input  [23:0] io_loopStart,
+  input  [23:0] io_loopEnd,
+  input  [23:0] io_stopAddr,
+  output        io_restartTaken,
+  output [2:0]  io_restartIndex,
+  output        io_ended,
+  output [2:0]  io_endedIndex,
   output        io_audio_valid,
-  output [15:0] io_audio_bits_left,
+  output [15:0] io_audio,
+  output        io_overrun,
   output        io_rom_rd,
   output [23:0] io_rom_addr,
   input  [7:0]  io_rom_dout,
   input         io_rom_wait_n,
-  input         io_rom_valid,
-  input         io_ss_hold,
-  input         io_ss_restore_enable,
-  output        io_ss_idle,
-  cave_ssbus_if.slave io_ss_channel_bus,
-  cave_ssbus_if.slave io_ss_scheduler_bus
+  input         io_rom_valid
 );
-  localparam [3:0] STATE_INIT    = 4'd0;
-  localparam [3:0] STATE_IDLE    = 4'd1;
-  localparam [3:0] STATE_READ    = 4'd2;
-  localparam [3:0] STATE_LATCH   = 4'd3;
-  localparam [3:0] STATE_CHECK   = 4'd4;
-  localparam [3:0] STATE_READY   = 4'd5;
-  localparam [3:0] STATE_PROCESS = 4'd6;
-  localparam [3:0] STATE_WRITE   = 4'd7;
-  localparam [3:0] STATE_NEXT    = 4'd8;
-  localparam [3:0] STATE_DONE    = 4'd9;
+  // ---------------------------------------------------------- the sample rate
+  // clock / 192 of a 16.9344 or a 16 MHz chip, in steps of 6400 Hz of chip
+  // clock: 2646 or 2500 a clock against 192 * CLOCK_HZ / 6400
+  localparam integer RATE_DEN = CLOCK_HZ / 100 * 3;
+  reg  [31:0] rateAcc;
+  wire [31:0] rateInc = io_clock16m ? RATE16_INC : 32'd2646;
+  wire [31:0] rateDen = io_clock16m ? RATE16_DEN : RATE_DEN;
+  wire [31:0] rateSum = rateAcc + rateInc;
+  wire        tick = rateSum >= rateDen;
+  reg         tickPending;
 
-  reg [3:0]  stateReg;
-  reg [2:0]  channelCounter;
-  reg [8:0]  outputCounter;
-  reg [16:0] accumulatorReg_left;
-  reg        pendingReg;
+  // ------------------------------------------------- MAME's stream updates
+  localparam integer UPDATE_CLOCKS = CLOCK_HZ / 50;
+  reg  [31:0] updateCount;
+  wire        update20 = updateCount == UPDATE_CLOCKS - 1;
+  reg         boundary;            // an update since the last sample begun
+  reg         updateStart;         // this sample begins an update
 
-  reg        channelStateReg_enable;
-  reg        channelStateReg_active;
-  reg        channelStateReg_done;
-  reg        channelStateReg_nibble;
-  reg [23:0] channelStateReg_addr;
-  reg        channelStateReg_loopStart;
-  reg [15:0] channelStateReg_audioPipelineState_samples_0;
-  reg [15:0] channelStateReg_audioPipelineState_samples_1;
-  reg        channelStateReg_audioPipelineState_underflow;
-  reg [15:0] channelStateReg_audioPipelineState_adpcmStep;
-  reg [9:0]  channelStateReg_audioPipelineState_lerpIndex;
-  reg        channelStateReg_audioPipelineState_loopEnable;
-  reg [15:0] channelStateReg_audioPipelineState_loopStep;
-  reg [15:0] channelStateReg_audioPipelineState_loopSample;
+  // ------------------------------------------------------------ the voices
+  // position (nibbles, 25), signal, step, the loop's signal and step, looped,
+  // prev, curr, the interpolation point (10), ramping
+  reg [24:0] vPosition   [0:7];
+  reg [15:0] vSignal     [0:7];
+  reg [14:0] vStep       [0:7];
+  reg [15:0] vLoopSignal [0:7];
+  reg [14:0] vLoopStep   [0:7];
+  reg        vLooped     [0:7];
+  reg [15:0] vPrev       [0:7];
+  reg [15:0] vCurr       [0:7];
+  reg [9:0]  vPos        [0:7];
+  reg        vRamp       [0:7];
+  reg        vSilent     [0:7];
 
-  reg [7:0]  channelPitch;
-  reg        channelKeyOn;
-  reg        channelLoop;
-  reg [7:0]  channelLevel;
-  reg [3:0]  channelPan;
-  reg [23:0] channelStartAddr;
-  reg [23:0] channelLoopStartAddr;
-  reg [23:0] channelLoopEndAddr;
-  reg [23:0] channelEndAddr;
+  localparam [3:0] S_IDLE   = 4'd0,
+                   S_LATCH  = 4'd1,
+                   S_CHECK  = 4'd2,
+                   S_TAKE   = 4'd3,
+                   S_FETCH  = 4'd4,
+                   S_SHIFT  = 4'd5,
+                   S_EMIT2  = 4'd6,
+                   S_LEVEL  = 4'd7,
+                   S_SUM    = 4'd8,
+                   S_WRITE  = 4'd9;
+  reg [3:0]  state;
+  reg [2:0]  index;
 
-  wire stateInit = stateReg == STATE_INIT;
-  wire stateIdle = stateReg == STATE_IDLE;
-  wire stateRead = stateReg == STATE_READ;
-  wire stateLatch = stateReg == STATE_LATCH;
-  wire stateCheck = stateReg == STATE_CHECK;
-  wire stateReady = stateReg == STATE_READY;
-  wire stateWrite = stateReg == STATE_WRITE;
-  wire stateNext = stateReg == STATE_NEXT;
+  // the voice being played
+  reg [24:0] position;
+  reg signed [15:0] signal, loopSignal;
+  reg [14:0] step, loopStep;
+  reg        looped;
+  reg signed [15:0] prev, curr;
+  reg [9:0]  pos;
+  reg        ramp;
+  reg        playing;
+  reg        emitted;
+  reg        ended;
+  reg        silent;
+  reg signed [15:0] interp;
+  reg signed [15:0] next;
+  reg signed [24:0] left, right;
+  reg signed [28:0] acc;
+  reg [15:0] audioReg;
+  reg        audioValidReg;
+  reg        overrunReg;
+  reg        romPending;
 
-  wire channelCounterWrap = (stateInit | stateNext) & (&channelCounter);
-  wire outputCounterWrap = outputCounter == 9'h16A;
+  // ---------------------------------------------------------- the datapath
+  // prev + floor((curr - prev) * pos / 512): MAME's (prev * (512 - pos) +
+  // curr * pos) >> 9
+  wire signed [16:0] slope = {curr[15], curr} - {prev[15], prev};
+  wire signed [27:0] slopePos = slope * $signed({1'b0, pos});
+  wire signed [15:0] lerp = 16'(prev + 16'(slopePos >>> 9));
 
-  wire startChannel = ~channelStateReg_enable & ~channelStateReg_active & channelKeyOn;
-  wire stopChannel = channelStateReg_enable & ~channelKeyOn;
+  // MAME's update_volumes
+  wire [10:0] panScaled = {3'd0, io_level} *
+                          (io_pan < 4'd8 ? {7'd0, io_pan - 4'd1} : {7'd0, 4'd15 - io_pan});
+  wire [7:0]  panLevel = 8'(({13'd0, panScaled} * 24'd1171) >> 13);    // / 7, exact to 1530
+  wire [7:0]  volLeft  = (io_pan <= 4'd8) ? io_level : panLevel;
+  wire [7:0]  volRight = (io_pan >= 4'd8) ? io_level :
+                         (io_pan == 4'd0) ? 8'd0 : panLevel;
 
-  wire [3:0] audioPipeline_io_pcmData_bits =
-    channelStateReg_nibble ? io_rom_dout[3:0] : io_rom_dout[7:4];
+  // trunc(interp * vol / 2), as C divides
+  wire signed [24:0] prodLeft  = interp * $signed({1'b0, volLeft});
+  wire signed [24:0] prodRight = interp * $signed({1'b0, volRight});
+  wire signed [24:0] halfLeft  = (prodLeft  + (prodLeft[24]  ? 25'sd1 : 25'sd0)) >>> 1;
+  wire signed [24:0] halfRight = (prodRight + (prodRight[24] ? 25'sd1 : 25'sd0)) >>> 1;
 
-  wire        audioPipeline_io_in_ready;
-  wire        audioPipeline_io_out_valid;
-  wire [15:0] audioPipeline_io_out_bits_state_samples_0;
-  wire [15:0] audioPipeline_io_out_bits_state_samples_1;
-  wire        audioPipeline_io_out_bits_state_underflow;
-  wire [15:0] audioPipeline_io_out_bits_state_adpcmStep;
-  wire [9:0]  audioPipeline_io_out_bits_state_lerpIndex;
-  wire        audioPipeline_io_out_bits_state_loopEnable;
-  wire [15:0] audioPipeline_io_out_bits_state_loopStep;
-  wire [15:0] audioPipeline_io_out_bits_state_loopSample;
-  wire [16:0] audioPipeline_io_out_bits_audio_left;
-  wire        audioPipeline_io_pcmData_ready;
-  wire        audioPipelineIdle;
-
-  wire audioPipelineInputValid = stateReady;
-  wire pcmDataFire = audioPipeline_io_pcmData_ready & io_rom_valid;
-  wire pcmDataLowNibble = pcmDataFire & channelStateReg_nibble;
-  wire atLoopEnd = channelLoop & (channelStateReg_addr == channelLoopEndAddr);
-  wire atSampleEnd = channelStateReg_addr == channelEndAddr;
-
-  wire [120:0] channelStateMemReadData;
-  wire channelStateMemWriteEnable = stateInit | stateWrite;
-  wire [120:0] defaultChannelState = {
-    1'b0,        // enable
-    1'b0,        // active
-    1'b0,        // done
-    1'b0,        // nibble
-    24'h000000,  // addr
-    1'b0,        // loopStart
-    16'h0000,    // samples_1
-    16'h0000,    // samples_0
-    1'b1,        // underflow
-    16'h007F,    // adpcmStep
-    10'h000,     // lerpIndex
-    1'b0,        // loopEnable
-    16'h0000,    // loopStep
-    16'h0000     // loopSample
-  };
-  wire [120:0] currentChannelState = {
-    channelStateReg_enable,
-    channelStateReg_active,
-    channelStateReg_done,
-    channelStateReg_nibble,
-    channelStateReg_addr,
-    channelStateReg_loopStart,
-    channelStateReg_audioPipelineState_samples_1,
-    channelStateReg_audioPipelineState_samples_0,
-    channelStateReg_audioPipelineState_underflow,
-    channelStateReg_audioPipelineState_adpcmStep,
-    channelStateReg_audioPipelineState_lerpIndex,
-    channelStateReg_audioPipelineState_loopEnable,
-    channelStateReg_audioPipelineState_loopStep,
-    channelStateReg_audioPipelineState_loopSample
-  };
-  wire [120:0] channelStateMemWriteData =
-    stateWrite ? currentChannelState : defaultChannelState;
-
-  wire        saveStateEnable = io_ss_hold & io_ss_idle;
-  wire        channelStateRamRd;
-  wire        channelStateRamWr;
-  wire [2:0]  channelStateRamAddr;
-  wire [120:0] channelStateRamWriteData;
-  wire        schedulerRestoreWr;
-  wire [31:0] schedulerRestoreAddr;
-  wire [63:0] schedulerRestoreData;
-  wire [63:0] schedulerStateWord0 = {
-    24'h594D53,
-    6'd0,
-    stateReg,
-    channelCounter,
-    outputCounter,
-    accumulatorReg_left,
-    pendingReg
-  };
-  wire [63:0] schedulerStateWord1 = currentChannelState[63:0];
-  wire [63:0] schedulerStateWord2 = {7'd0, currentChannelState[120:64]};
-  wire [191:0] schedulerState = {
-    schedulerStateWord2,
-    schedulerStateWord1,
-    schedulerStateWord0
-  };
-
-  wire        mem_enable = channelStateMemReadData[120];
-  wire        mem_active = channelStateMemReadData[119];
-  wire        mem_done = channelStateMemReadData[118];
-  wire        mem_nibble = channelStateMemReadData[117];
-  wire [23:0] mem_addr = channelStateMemReadData[116:93];
-  wire        mem_loopStart = channelStateMemReadData[92];
-  wire [15:0] mem_samples_1 = channelStateMemReadData[91:76];
-  wire [15:0] mem_samples_0 = channelStateMemReadData[75:60];
-  wire        mem_underflow = channelStateMemReadData[59];
-  wire [15:0] mem_adpcmStep = channelStateMemReadData[58:43];
-  wire [9:0]  mem_lerpIndex = channelStateMemReadData[42:33];
-  wire        mem_loopEnable = channelStateMemReadData[32];
-  wire [15:0] mem_loopStep = channelStateMemReadData[31:16];
-  wire [15:0] mem_loopSample = channelStateMemReadData[15:0];
-
-  wire        activeBase = stateLatch ? mem_active : channelStateReg_active;
-  wire        checkedActive =
-    stateCheck ? (startChannel | (~stopChannel & activeBase)) : activeBase;
-  wire        nextActive = (~pcmDataLowNibble | atLoopEnd | ~atSampleEnd) & checkedActive;
-
-  wire        doneBase = stateLatch ? mem_done : channelStateReg_done;
-  wire        doneCleared =
-    ~(stateCheck & (startChannel | stopChannel | channelStateReg_done)) & doneBase;
-  wire        nextDone = (pcmDataLowNibble & ~atLoopEnd & atSampleEnd) | doneCleared;
-
-  wire        nibbleBase = stateLatch ? mem_nibble : channelStateReg_nibble;
-  wire        nextNibble =
-    pcmDataFire ? ~channelStateReg_nibble : (~(stateCheck & startChannel) & nibbleBase);
-
-  wire        loopStartBase = stateLatch ? mem_loopStart : channelStateReg_loopStart;
-  wire        nextLoopStart =
-    pcmDataFire
-      ? (channelLoop & (channelStateReg_addr == channelLoopStartAddr) & ~channelStateReg_nibble)
-      : (~(stateCheck & startChannel) & loopStartBase);
-
-  wire        underflowBase = stateLatch ? mem_underflow : channelStateReg_audioPipelineState_underflow;
-  wire        nextUnderflow =
-    audioPipeline_io_out_valid
-      ? audioPipeline_io_out_bits_state_underflow
-      : ((stateCheck & startChannel) | underflowBase);
-
-  wire        loopEnableBase = stateLatch ? mem_loopEnable : channelStateReg_audioPipelineState_loopEnable;
-  wire        nextLoopEnable =
-    audioPipeline_io_out_valid
-      ? audioPipeline_io_out_bits_state_loopEnable
-      : (~(stateCheck & startChannel) & loopEnableBase);
-
-  wire signed [16:0] accumulatorSigned = accumulatorReg_left;
-  wire signed [16:0] accumulatorLowClamped =
-    (accumulatorSigned < 17'sh18000) ? 17'sh18000 : accumulatorSigned;
-
+  // the ADPCM nibble at the position, high first
+  wire [3:0]  nibble = position[0] ? io_rom_dout[3:0] : io_rom_dout[7:4];
+  wire [3:0]  diffMag = {nibble[2:0], 1'b1};                       // 1, 3 .. 15
+  wire signed [20:0] diffProd = $signed({1'b0, step}) * $signed({1'b0, diffMag});
+  wire signed [20:0] delta = nibble[3] ? -(diffProd >>> 3) : (diffProd >>> 3);  // trunc(step * diff / 8)
+  wire signed [17:0] signalSum = {{2{signal[15]}}, signal} + 18'(delta);
+  wire signed [15:0] newSignal = signalSum > 18'sd32767 ? 16'sd32767 :
+                                 signalSum < -18'sd32768 ? -16'sd32768 : signalSum[15:0];
+  reg  [9:0]  indexScale;
   always @(*) begin
-    channelPitch = io_regs_7_pitch;
-    channelKeyOn = io_regs_7_flags_keyOn;
-    channelLoop = io_regs_7_flags_loop;
-    channelLevel = io_regs_7_level;
-    channelPan = io_regs_7_pan;
-    channelStartAddr = io_regs_7_startAddr;
-    channelLoopStartAddr = io_regs_7_loopStartAddr;
-    channelLoopEndAddr = io_regs_7_loopEndAddr;
-    channelEndAddr = io_regs_7_endAddr;
-
-    case (channelCounter)
-      3'd0: begin
-        channelPitch = io_regs_0_pitch;
-        channelKeyOn = io_regs_0_flags_keyOn;
-        channelLoop = io_regs_0_flags_loop;
-        channelLevel = io_regs_0_level;
-        channelPan = io_regs_0_pan;
-        channelStartAddr = io_regs_0_startAddr;
-        channelLoopStartAddr = io_regs_0_loopStartAddr;
-        channelLoopEndAddr = io_regs_0_loopEndAddr;
-        channelEndAddr = io_regs_0_endAddr;
-      end
-      3'd1: begin
-        channelPitch = io_regs_1_pitch;
-        channelKeyOn = io_regs_1_flags_keyOn;
-        channelLoop = io_regs_1_flags_loop;
-        channelLevel = io_regs_1_level;
-        channelPan = io_regs_1_pan;
-        channelStartAddr = io_regs_1_startAddr;
-        channelLoopStartAddr = io_regs_1_loopStartAddr;
-        channelLoopEndAddr = io_regs_1_loopEndAddr;
-        channelEndAddr = io_regs_1_endAddr;
-      end
-      3'd2: begin
-        channelPitch = io_regs_2_pitch;
-        channelKeyOn = io_regs_2_flags_keyOn;
-        channelLoop = io_regs_2_flags_loop;
-        channelLevel = io_regs_2_level;
-        channelPan = io_regs_2_pan;
-        channelStartAddr = io_regs_2_startAddr;
-        channelLoopStartAddr = io_regs_2_loopStartAddr;
-        channelLoopEndAddr = io_regs_2_loopEndAddr;
-        channelEndAddr = io_regs_2_endAddr;
-      end
-      3'd3: begin
-        channelPitch = io_regs_3_pitch;
-        channelKeyOn = io_regs_3_flags_keyOn;
-        channelLoop = io_regs_3_flags_loop;
-        channelLevel = io_regs_3_level;
-        channelPan = io_regs_3_pan;
-        channelStartAddr = io_regs_3_startAddr;
-        channelLoopStartAddr = io_regs_3_loopStartAddr;
-        channelLoopEndAddr = io_regs_3_loopEndAddr;
-        channelEndAddr = io_regs_3_endAddr;
-      end
-      3'd4: begin
-        channelPitch = io_regs_4_pitch;
-        channelKeyOn = io_regs_4_flags_keyOn;
-        channelLoop = io_regs_4_flags_loop;
-        channelLevel = io_regs_4_level;
-        channelPan = io_regs_4_pan;
-        channelStartAddr = io_regs_4_startAddr;
-        channelLoopStartAddr = io_regs_4_loopStartAddr;
-        channelLoopEndAddr = io_regs_4_loopEndAddr;
-        channelEndAddr = io_regs_4_endAddr;
-      end
-      3'd5: begin
-        channelPitch = io_regs_5_pitch;
-        channelKeyOn = io_regs_5_flags_keyOn;
-        channelLoop = io_regs_5_flags_loop;
-        channelLevel = io_regs_5_level;
-        channelPan = io_regs_5_pan;
-        channelStartAddr = io_regs_5_startAddr;
-        channelLoopStartAddr = io_regs_5_loopStartAddr;
-        channelLoopEndAddr = io_regs_5_loopEndAddr;
-        channelEndAddr = io_regs_5_endAddr;
-      end
-      3'd6: begin
-        channelPitch = io_regs_6_pitch;
-        channelKeyOn = io_regs_6_flags_keyOn;
-        channelLoop = io_regs_6_flags_loop;
-        channelLevel = io_regs_6_level;
-        channelPan = io_regs_6_pan;
-        channelStartAddr = io_regs_6_startAddr;
-        channelLoopStartAddr = io_regs_6_loopStartAddr;
-        channelLoopEndAddr = io_regs_6_loopEndAddr;
-        channelEndAddr = io_regs_6_endAddr;
-      end
-      default: begin
-      end
+    case (nibble[2:0])
+      3'd4:    indexScale = 10'h133;
+      3'd5:    indexScale = 10'h199;
+      3'd6:    indexScale = 10'h200;
+      3'd7:    indexScale = 10'h266;
+      default: indexScale = 10'h0e6;
     endcase
   end
+  wire [24:0] stepProd = step * indexScale;
+  wire [16:0] stepScaled = stepProd[24:8];
+  wire [14:0] newStep = stepScaled > 17'h6000 ? 15'h6000 :
+                        stepScaled < 17'h007f ? 15'h007f : stepScaled[14:0];
 
+  // the position after the nibble, the loop and the end, as MAME's
+  // generate_adpcm takes them
+  wire [24:0] position1   = position + 25'd1;
+  wire [24:0] loopStart2  = {io_loopStart, 1'b0};
+  wire [24:0] loopEnd2    = {io_loopEnd, 1'b0};
+  wire [24:0] stop2       = {io_stopAddr, 1'b0};
+  wire        atLoopStart = io_looping && position1 == loopStart2 && !looped;
+  wire        takeLoop    = io_looping && position1 >= loopEnd2 && io_keyOn;
+  wire [24:0] position2   = takeLoop ? loopStart2 : position1;
+  wire        atEnd       = position2 >= stop2;
+
+  // MAME's ramp to zero: t * 15 / 16, towards zero
+  wire signed [16:0] curr17 = curr;
+  wire [16:0] currMag = curr17[16] ? 17'(-curr17) : 17'(curr17);
+  wire [19:0] rampMag = {3'd0, currMag} * 20'd15;
+  wire signed [15:0] rampNext = curr[15] ? -$signed({1'b0, rampMag[18:4]}) : $signed({1'b0, rampMag[18:4]});
+
+  // the output: the sum over 256, towards zero, held to 16 bits
+  wire signed [28:0] accOut = (acc + (acc[28] ? 29'sd255 : 29'sd0)) >>> 8;
+  wire [15:0] audioOut = accOut > 29'sd32767 ? 16'h7fff :
+                         accOut < -29'sd32768 ? 16'h8000 : accOut[15:0];
+
+  wire [9:0] stepSize = (io_fnum[7:0] + 10'd1);   // ADPCM: fnum & 0xff, + 1
+
+  integer i;
   always @(posedge clock) begin
     if (reset) begin
-      stateReg <= STATE_INIT;
-      channelCounter <= 3'd0;
-      outputCounter <= 9'd0;
-      accumulatorReg_left <= 17'd0;
-      pendingReg <= 1'b0;
-      channelStateReg_enable <= 1'b0;
-      channelStateReg_active <= 1'b0;
-      channelStateReg_done <= 1'b0;
-      channelStateReg_nibble <= 1'b0;
-      channelStateReg_addr <= 24'd0;
-      channelStateReg_loopStart <= 1'b0;
-      channelStateReg_audioPipelineState_samples_0 <= 16'd0;
-      channelStateReg_audioPipelineState_samples_1 <= 16'd0;
-      channelStateReg_audioPipelineState_underflow <= 1'b1;
-      channelStateReg_audioPipelineState_adpcmStep <= 16'h007F;
-      channelStateReg_audioPipelineState_lerpIndex <= 10'd0;
-      channelStateReg_audioPipelineState_loopEnable <= 1'b0;
-      channelStateReg_audioPipelineState_loopStep <= 16'd0;
-      channelStateReg_audioPipelineState_loopSample <= 16'd0;
-    end
-    else if (schedulerRestoreWr) begin
-      case (schedulerRestoreAddr)
-        32'd0: begin
-          if (schedulerRestoreData[63:40] == 24'h594D53) begin
-            stateReg <= schedulerRestoreData[33:30];
-            channelCounter <= schedulerRestoreData[29:27];
-            outputCounter <= schedulerRestoreData[26:18];
-            accumulatorReg_left <= schedulerRestoreData[17:1];
-            pendingReg <= schedulerRestoreData[0];
+      state <= S_IDLE;
+      index <= 3'd0;
+      rateAcc <= 32'd0;
+      tickPending <= 1'b0;
+      acc <= 29'sd0;
+      audioReg <= 16'h0000;
+      audioValidReg <= 1'b0;
+      overrunReg <= 1'b0;
+      romPending <= 1'b0;
+      updateCount <= 32'd0;
+      boundary <= 1'b0;
+      updateStart <= 1'b0;
+      for (i = 0; i < 8; i = i + 1) begin
+        vPosition[i] <= 25'd0;  vSignal[i] <= 16'd0;  vStep[i] <= 15'h7f;
+        vLoopSignal[i] <= 16'd0; vLoopStep[i] <= 15'h7f; vLooped[i] <= 1'b0;
+        vPrev[i] <= 16'd0;  vCurr[i] <= 16'd0;  vPos[i] <= 10'd512;  vRamp[i] <= 1'b0;
+        vSilent[i] <= 1'b1;
+      end
+    end else begin
+      audioValidReg <= 1'b0;
+      overrunReg <= 1'b0;
+      rateAcc <= tick ? rateSum - rateDen : rateSum;
+      updateCount <= update20 ? 32'd0 : updateCount + 32'd1;
+      if (io_access || update20)
+        boundary <= 1'b1;
+      if (tick) begin
+        tickPending <= 1'b1;
+        if (tickPending || state != S_IDLE)
+          overrunReg <= 1'b1;
+      end
+
+      case (state)
+        S_IDLE:
+          if ((tickPending || tick) && !io_hold) begin
+            // the last sample out, the next begun
+            tickPending <= 1'b0;
+            audioReg <= audioOut;
+            audioValidReg <= 1'b1;
+            acc <= 29'sd0;
+            index <= 3'd0;
+            // an access now still comes before the sample; the 20 ms
+            // update falls at its start, so after it
+            updateStart <= boundary || io_access;
+            boundary <= update20;
+            state <= S_LATCH;
+          end
+
+        S_LATCH: begin
+          // a key on since: the decoder back to the start (MAME keeps the
+          // interpolation going)
+          if (io_restart) begin
+            position <= {io_startAddr, 1'b0};
+            signal <= 16'sd0;  loopSignal <= 16'sd0;
+            step <= 15'h7f;    loopStep <= 15'h7f;
+            looped <= 1'b0;
+          end else begin
+            position <= vPosition[index];
+            signal <= vSignal[index];  loopSignal <= vLoopSignal[index];
+            step <= vStep[index];      loopStep <= vLoopStep[index];
+            looped <= vLooped[index];
+          end
+          prev <= vPrev[index];
+          curr <= vCurr[index];
+          pos <= vPos[index];
+          ramp <= vRamp[index] & ~io_playing & ~updateStart;
+          playing <= io_playing;
+          // silent from an update's start to its end
+          silent <= updateStart ? (!io_playing && vPrev[index] == 16'd0 && vCurr[index] == 16'd0)
+                                : vSilent[index];
+          ended <= 1'b0;
+          state <= S_CHECK;
+        end
+
+        S_CHECK: begin
+          emitted <= 1'b0;
+          if (silent) begin
+            pos <= 10'd512;
+            state <= S_WRITE;
+          end else if (pos < 10'd512) begin
+            interp <= lerp;
+            emitted <= 1'b1;
+            pos <= pos + stepSize;
+            state <= (pos + stepSize >= 10'd512) ? S_TAKE : S_LEVEL;
+          end else
+            state <= S_TAKE;
+        end
+
+        S_TAKE: begin
+          pos <= pos - 10'd512;
+          if (playing)
+            state <= S_FETCH;
+          else begin
+            next <= ramp ? rampNext : 16'sd0;
+            if (ramp && rampNext == 16'sd0)
+              ramp <= 1'b0;
+            state <= S_SHIFT;
           end
         end
-        32'd1: begin
-          channelStateReg_audioPipelineState_samples_0[3:0] <=
-            schedulerRestoreData[63:60];
-          channelStateReg_audioPipelineState_underflow <=
-            schedulerRestoreData[59];
-          channelStateReg_audioPipelineState_adpcmStep <=
-            schedulerRestoreData[58:43];
-          channelStateReg_audioPipelineState_lerpIndex <=
-            schedulerRestoreData[42:33];
-          channelStateReg_audioPipelineState_loopEnable <=
-            schedulerRestoreData[32];
-          channelStateReg_audioPipelineState_loopStep <=
-            schedulerRestoreData[31:16];
-          channelStateReg_audioPipelineState_loopSample <=
-            schedulerRestoreData[15:0];
+
+        S_FETCH:
+          if (io_rom_valid && romPending) begin
+            next <= newSignal;
+            signal <= newSignal;
+            step <= newStep;
+            if (atLoopStart) begin
+              loopSignal <= newSignal;
+              loopStep <= newStep;
+            end
+            if (takeLoop) begin
+              signal <= atLoopStart ? newSignal : loopSignal;
+              step <= atLoopStart ? newStep : loopStep;
+              looped <= 1'b1;
+            end
+            position <= position2;
+            if (atEnd) begin
+              ended <= 1'b1;
+              playing <= 1'b0;
+              ramp <= 1'b1;
+            end
+            state <= S_SHIFT;
+          end
+
+        S_SHIFT: begin
+          prev <= curr;
+          curr <= next;
+          state <= emitted ? S_LEVEL : S_EMIT2;
         end
-        32'd2: begin
-          channelStateReg_enable <= schedulerRestoreData[56];
-          channelStateReg_active <= schedulerRestoreData[55];
-          channelStateReg_done <= schedulerRestoreData[54];
-          channelStateReg_nibble <= schedulerRestoreData[53];
-          channelStateReg_addr <= schedulerRestoreData[52:29];
-          channelStateReg_loopStart <= schedulerRestoreData[28];
-          channelStateReg_audioPipelineState_samples_1 <=
-            schedulerRestoreData[27:12];
-          channelStateReg_audioPipelineState_samples_0[15:4] <=
-            schedulerRestoreData[11:0];
+
+        S_EMIT2: begin
+          interp <= lerp;
+          pos <= pos + stepSize;
+          state <= S_LEVEL;
         end
-        default: begin
+
+        S_LEVEL: begin
+          left <= halfLeft;
+          right <= halfRight;
+          state <= S_SUM;
         end
-      endcase
-    end
-    else if (!(io_ss_hold && io_ss_idle)) begin
-      case (stateReg)
-        STATE_INIT: begin
-          if (channelCounterWrap)
-            stateReg <= STATE_IDLE;
+
+        S_SUM: begin
+          acc <= acc + 29'(left) + 29'(right);
+          state <= S_WRITE;
         end
-        STATE_IDLE: begin
-          if (io_enable && !io_ss_hold)
-            stateReg <= STATE_READ;
+
+        S_WRITE: begin
+          vPosition[index] <= position;
+          vSignal[index] <= signal;  vLoopSignal[index] <= loopSignal;
+          vStep[index] <= step;      vLoopStep[index] <= loopStep;
+          vLooped[index] <= looped;
+          vPrev[index] <= prev;
+          vCurr[index] <= curr;
+          vPos[index] <= pos;
+          vRamp[index] <= ramp;
+          vSilent[index] <= silent;
+          index <= index + 3'd1;
+          state <= (index == 3'd7) ? S_IDLE : S_LATCH;
         end
-        STATE_READ: begin
-          stateReg <= STATE_LATCH;
-        end
-        STATE_LATCH: begin
-          stateReg <= STATE_CHECK;
-        end
-        STATE_CHECK: begin
-          stateReg <= (channelStateReg_active | startChannel) ? STATE_READY : STATE_WRITE;
-        end
-        STATE_READY: begin
-          if (audioPipeline_io_in_ready)
-            stateReg <= STATE_PROCESS;
-        end
-        STATE_PROCESS: begin
-          if (audioPipeline_io_out_valid)
-            stateReg <= STATE_WRITE;
-        end
-        STATE_WRITE: begin
-          stateReg <= STATE_NEXT;
-        end
-        STATE_NEXT: begin
-          stateReg <= channelCounterWrap ? STATE_DONE : STATE_READ;
-        end
-        STATE_DONE: begin
-          if (outputCounterWrap)
-            stateReg <= STATE_IDLE;
-        end
-        default: begin
-          stateReg <= STATE_INIT;
-        end
+
+        default:
+          state <= S_IDLE;
       endcase
 
-      if (stateInit | stateNext)
-        channelCounter <= channelCounter + 3'd1;
-
-      outputCounter <= outputCounterWrap ? 9'd0 : outputCounter + 9'd1;
-      pendingReg <= ~io_rom_valid & ((audioPipeline_io_pcmData_ready & io_rom_wait_n) | pendingReg);
-
-      if (audioPipeline_io_out_valid) begin
-        accumulatorReg_left <= accumulatorReg_left + audioPipeline_io_out_bits_audio_left;
-        channelStateReg_audioPipelineState_samples_0 <= audioPipeline_io_out_bits_state_samples_0;
-        channelStateReg_audioPipelineState_samples_1 <= audioPipeline_io_out_bits_state_samples_1;
-        channelStateReg_audioPipelineState_adpcmStep <= audioPipeline_io_out_bits_state_adpcmStep;
-        channelStateReg_audioPipelineState_lerpIndex <= audioPipeline_io_out_bits_state_lerpIndex;
-        channelStateReg_audioPipelineState_loopStep <= audioPipeline_io_out_bits_state_loopStep;
-        channelStateReg_audioPipelineState_loopSample <= audioPipeline_io_out_bits_state_loopSample;
-      end
-      else begin
-        if (stateIdle)
-          accumulatorReg_left <= 17'd0;
-
-        if (stateCheck & startChannel) begin
-          channelStateReg_audioPipelineState_samples_0 <= 16'd0;
-          channelStateReg_audioPipelineState_samples_1 <= 16'd0;
-          channelStateReg_audioPipelineState_adpcmStep <= 16'h007F;
-          channelStateReg_audioPipelineState_lerpIndex <= 10'd0;
-          channelStateReg_audioPipelineState_loopStep <= 16'd0;
-          channelStateReg_audioPipelineState_loopSample <= 16'd0;
-        end
-        else if (stateLatch) begin
-          channelStateReg_audioPipelineState_samples_0 <= mem_samples_0;
-          channelStateReg_audioPipelineState_samples_1 <= mem_samples_1;
-          channelStateReg_audioPipelineState_adpcmStep <= mem_adpcmStep;
-          channelStateReg_audioPipelineState_lerpIndex <= mem_lerpIndex;
-          channelStateReg_audioPipelineState_loopStep <= mem_loopStep;
-          channelStateReg_audioPipelineState_loopSample <= mem_loopSample;
-        end
-      end
-
-      if (stateCheck)
-        channelStateReg_enable <= startChannel | (~stopChannel & channelStateReg_enable);
-      else if (stateLatch)
-        channelStateReg_enable <= mem_enable;
-
-      channelStateReg_active <= nextActive;
-      channelStateReg_done <= nextDone;
-      channelStateReg_nibble <= nextNibble;
-      channelStateReg_loopStart <= nextLoopStart;
-      channelStateReg_audioPipelineState_underflow <= nextUnderflow;
-      channelStateReg_audioPipelineState_loopEnable <= nextLoopEnable;
-
-      if (pcmDataLowNibble) begin
-        if (atLoopEnd)
-          channelStateReg_addr <= channelLoopStartAddr;
-        else if (atSampleEnd) begin
-          if (stateCheck & startChannel)
-            channelStateReg_addr <= channelStartAddr;
-          else if (stateLatch)
-            channelStateReg_addr <= mem_addr;
-        end
-        else
-          channelStateReg_addr <= channelStateReg_addr + 24'd1;
-      end
-      else if (stateCheck & startChannel)
-        channelStateReg_addr <= channelStartAddr;
-      else if (stateLatch)
-        channelStateReg_addr <= mem_addr;
+      // the ROM: one read at a time, taken when wait_n allows
+      if (io_rom_rd && io_rom_wait_n)
+        romPending <= 1'b1;
+      if (io_rom_valid)
+        romPending <= 1'b0;
     end
   end
 
-  CaveSaveStateWideRamPort #(
-    .WIDTH      (121),
-    .ADDR_WIDTH (3),
-    .SS_IDX     (8'd30)
-  ) channelStateSaveState (
-    .clk            (clock),
-    .reset          (reset),
-    .state_enable   (saveStateEnable),
-    .restore_enable (io_ss_restore_enable),
-    .normal_rd      (stateRead),
-    .normal_wr      (channelStateMemWriteEnable),
-    .normal_addr    (channelCounter),
-    .normal_data    (channelStateMemWriteData),
-    .ram_rd         (channelStateRamRd),
-    .ram_wr         (channelStateRamWr),
-    .ram_addr       (channelStateRamAddr),
-    .ram_data       (channelStateRamWriteData),
-    .ram_q          (channelStateMemReadData),
-    .blocked_access (),
-    .ssbus          (io_ss_channel_bus)
-  );
-
-  CaveSaveStateRegisterPort #(
-    .WIDTH        (64),
-    .COUNT        (3),
-    .SS_IDX       (8'd31),
-    .STREAM_WIDTH (2'd3)
-  ) schedulerSaveState (
-    .clk            (clock),
-    .reset          (reset),
-    .state_enable   (saveStateEnable),
-    .restore_enable (io_ss_restore_enable),
-    .capture_data   (schedulerState),
-    .restore_wr     (schedulerRestoreWr),
-    .restore_addr   (schedulerRestoreAddr),
-    .restore_data   (schedulerRestoreData),
-    .blocked_access (),
-    .ssbus          (io_ss_scheduler_bus)
-  );
-
-  CaveSyncReadMem #(
-    .ADDR_WIDTH (3),
-    .DATA_WIDTH (121),
-    .DEPTH      (8)
-  ) channelStateMem_ext (
-    .read_addr  (channelStateRamAddr),
-    .read_en    (channelStateRamRd),
-    .read_clk   (clock),
-    .read_data  (channelStateMemReadData),
-    .write_addr (channelStateRamAddr),
-    .write_en   (channelStateRamWr),
-    .write_clk  (clock),
-    .write_data (channelStateRamWriteData)
-  );
-
-  AudioPipeline audioPipeline (
-    .clock                        (clock),
-    .reset                        (reset),
-    .io_in_ready                  (audioPipeline_io_in_ready),
-    .io_in_valid                  (audioPipelineInputValid),
-    .io_in_bits_state_samples_0   (channelStateReg_audioPipelineState_samples_0),
-    .io_in_bits_state_samples_1   (channelStateReg_audioPipelineState_samples_1),
-    .io_in_bits_state_underflow   (channelStateReg_audioPipelineState_underflow),
-    .io_in_bits_state_adpcmStep   (channelStateReg_audioPipelineState_adpcmStep),
-    .io_in_bits_state_lerpIndex   (channelStateReg_audioPipelineState_lerpIndex),
-    .io_in_bits_state_loopEnable  (channelStateReg_audioPipelineState_loopEnable),
-    .io_in_bits_state_loopStep    (channelStateReg_audioPipelineState_loopStep),
-    .io_in_bits_state_loopSample  (channelStateReg_audioPipelineState_loopSample),
-    .io_in_bits_pitch             (channelPitch),
-    .io_in_bits_level             (channelLevel),
-    .io_in_bits_pan               (channelPan),
-    .io_out_valid                 (audioPipeline_io_out_valid),
-    .io_out_bits_state_samples_0  (audioPipeline_io_out_bits_state_samples_0),
-    .io_out_bits_state_samples_1  (audioPipeline_io_out_bits_state_samples_1),
-    .io_out_bits_state_underflow  (audioPipeline_io_out_bits_state_underflow),
-    .io_out_bits_state_adpcmStep  (audioPipeline_io_out_bits_state_adpcmStep),
-    .io_out_bits_state_lerpIndex  (audioPipeline_io_out_bits_state_lerpIndex),
-    .io_out_bits_state_loopEnable (audioPipeline_io_out_bits_state_loopEnable),
-    .io_out_bits_state_loopStep   (audioPipeline_io_out_bits_state_loopStep),
-    .io_out_bits_state_loopSample (audioPipeline_io_out_bits_state_loopSample),
-    .io_out_bits_audio_left       (audioPipeline_io_out_bits_audio_left),
-    .io_pcmData_ready             (audioPipeline_io_pcmData_ready),
-    .io_pcmData_valid             (io_rom_valid),
-    .io_pcmData_bits              (audioPipeline_io_pcmData_bits),
-    .io_loopStart                 (channelStateReg_loopStart),
-    .io_idle                      (audioPipelineIdle)
-  );
-
-  assign io_done = stateCheck & channelStateReg_done;
-  assign io_index = channelCounter;
-  assign io_audio_valid = outputCounterWrap & ~io_ss_hold;
-  assign io_audio_bits_left =
-    (accumulatorLowClamped < 17'sh07FFF) ? accumulatorLowClamped[15:0] : 16'h7FFF;
-  assign io_rom_rd = audioPipeline_io_pcmData_ready & ~pendingReg;
-  assign io_rom_addr = channelStateReg_addr;
-  assign io_ss_idle = stateIdle & audioPipelineIdle & ~pendingReg;
+  assign io_update = update20;
+  assign io_busy = state != S_IDLE;
+  assign io_index = index;
+  assign io_restartTaken = state == S_LATCH && io_restart;
+  assign io_restartIndex = index;
+  assign io_ended = state == S_WRITE && ended;
+  assign io_endedIndex = index;
+  assign io_audio_valid = audioValidReg;
+  assign io_audio = audioReg;
+  assign io_overrun = overrunReg;
+  assign io_rom_rd = state == S_FETCH && !romPending;
+  assign io_rom_addr = position[24:1];
 endmodule
