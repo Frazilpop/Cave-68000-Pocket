@@ -1,0 +1,105 @@
+# ---------------------------------------------------------------- vendored
+# Every cloned or downloaded repository lands here and is never committed.
+/third_party/
+
+# ------------------------------------------------------------------ builds
+# Everything generated lives under build/. The rest are artefacts Quartus and
+# Verilator place elsewhere when a setting is missed – kept so a stray one
+# cannot be committed.
+/build/
+db
+incremental_db
+output_files/
+greybox_tmp/
+simulation/
+timing/
+.qsys_edit/
+qdb/
+*.qws
+*.rpt
+*.summary
+*.smsg
+*.pin
+*.done
+*.jdi
+*.sld
+*.qar
+*.qarlog
+*.sopcinfo
+*.bak
+*.orig
+*.rej
+/c5_pin_model_dump.txt
+/pocket/src/fpga/c5_pin_model_dump.txt
+/jtag.cdf
+/cr_ie_info.json
+
+# Bitstreams and programming files – the one the card loads is built, never committed.
+*.sof
+*.pof
+*.rbf
+*.jic
+*.map
+*.fit
+*.sta
+*.asm
+/pocket/dist/Cores/*/bitstream.rbf_r
+
+# --------------------------------------------------------------- verilator
+obj_dir/
+/obj_*/
+/sim/**/obj_*/
+*.vcd
+*.fst
+*.fst.hier
+*.wlf
+
+# --------------------------------------------------------------- toolchain
+/tools/**/__pycache__/
+*.pyc
+# the Quartus installer: downloaded archive and unpacked tree, GBs each and not redistributable
+/tools/quartus-unpack
+/tools/*.tar
+/tools/*.tar.*
+/tools/Quartus*
+/tools/QuartusLiteSetup*
+/tools/*.qdz
+*.crdownload
+*.part
+*.download
+*.partial
+
+# -------------------------------------------------------------------- roms
+# Never commit ROM images or anything derived from them: dumps, region files,
+# traces, tables baked into source. The MAME zips stay where they are.
+/roms/
+/rom/
+*.zip
+*.7z
+*.hex
+
+# fx68k loads its microcode with $readmemb at run time, relative to the working
+# directory; the bootstrap symlinks it here. Upstream files.
+/microrom.mem
+/nanorom.mem
+/pocket/src/fpga/microrom.mem
+/pocket/src/fpga/nanorom.mem
+
+# MAME's own cfg/nvram directories, left by a run started from the repo root
+/cfg/
+/nvram/
+
+# ------------------------------------------------------------------ editor
+.vscode/*
+!.vscode/settings.json
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+
+# ------------------------------------------------------------------- local
+# The working notes, kept on disk and never published.
+/CLAUDE.md
+/docs/
