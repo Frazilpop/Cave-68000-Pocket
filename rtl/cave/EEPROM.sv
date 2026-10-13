@@ -184,12 +184,18 @@ module EEPROM(
         end
       end
 
+      // A read clocked past its sixteen bits keeps going while CS is high, as
+      // MAME's 93C46 does it (eeprom_serial, no streaming): sixteen zeros,
+      // then ones. Upstream went idle at the seventeenth clock, so DO read 1
+      // there; Fever SOS clocks that bit and keeps the input byte it lands
+      // in. The counter is spent (0) after the seventeenth clock, and ones
+      // are shifted in from then on.
       STATE_SHIFT_OUT: begin
         if (sckRising) begin
-          dataNext = {dataReg[14:0], 1'b0};
+          dataNext = {dataReg[14:0], counterReg == 17'h0};
           serialNext = dataReg[15];
           if (commandDone)
-            stateNext = STATE_IDLE;
+            dataNext = 16'h0001;
         end
       end
     endcase
