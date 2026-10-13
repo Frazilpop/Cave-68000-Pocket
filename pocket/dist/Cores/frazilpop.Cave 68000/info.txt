@@ -1,0 +1,4 @@
+Cave first-generation 68000 board: 68000 @ 16 MHz, Yamaha YMZ280B, Cave tilemap and 013 sprite chips
+
+Based on MiSTer-devel/Arcade-Cave_MiSTer (GPL-3.0), nullobject's Cave 68000 core.
+Analogue Pocket port by Frazilpop.
