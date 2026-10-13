@@ -134,6 +134,49 @@ module SpriteProcessor(
   wire acceptedFrameStart = io_ctrl_start & (stateReg == STATE_IDLE);
   wire frameDone = (stateReg == STATE_DONE) & ~blitterBusy;
   wire [15:0] spriteTileCount = {8'h00, spriteReg_cols} * {8'h00, spriteReg_rows};
+
+  // Where a sprite starts, as MAME's sprite013 places it: the position's
+  // fraction is dropped, a sprite zoomed to a pixel or less starts half a
+  // pixel back, and a flipped zoomed one moves so that its far edge stays
+  // put (by the S.9.6 fraction, or by whole pixels in the integer mode).
+  // The blitter then puts the k-th pixel from the start at start + k * zoom
+  // / 256. Wrapped to ten bits, as the 013's positions are. The start is
+  // the position plus an offset that depends on the size and zoom alone,
+  // taken in three steps: the zoomed sizes multiplied at LATCH, the offset
+  // at CHECK, the sum as the blitter takes the sprite.
+  function automatic [17:0] zoomOffset(
+    input [11:0] size,
+    input [15:0] zoom,
+    input [27:0] zoomed,
+    input        flip,
+    input        fixed
+  );
+    reg [17:0] halfBack;
+    begin
+      halfBack = (zoomed[27:9] == 19'h0) ? 18'h80 : 18'h0;
+      if (~flip | zoom == 16'h0100)
+        zoomOffset = 18'(18'h0 - halfBack);
+      else if (fixed)
+        zoomOffset = 18'({size[9:0], 8'h00} - zoomed[17:0] - 18'h80 - halfBack);
+      else
+        zoomOffset = 18'({10'(size[9:0] - zoomed[17:8]), 8'h00} - halfBack);
+    end
+  endfunction
+
+  wire [11:0] spriteWidth = {spriteReg_cols, 4'h0};
+  wire [11:0] spriteHeight = {spriteReg_rows, 4'h0};
+  wire [4:0]  latchCols = io_ctrl_zoom ? io_ctrl_vram_dout[108:104] : io_ctrl_vram_dout[76:72];
+  wire [4:0]  latchRows = io_ctrl_zoom ? io_ctrl_vram_dout[100:96] : io_ctrl_vram_dout[68:64];
+  wire [15:0] latchZoomX = io_ctrl_zoom ? io_ctrl_vram_dout[79:64] : 16'h0100;
+  wire [15:0] latchZoomY = io_ctrl_zoom ? io_ctrl_vram_dout[95:80] : 16'h0100;
+  reg  [27:0] spriteZoomedWidth;
+  reg  [27:0] spriteZoomedHeight;
+  reg  [17:0] spriteOffsetX;
+  reg  [17:0] spriteOffsetY;
+  wire [17:0] spriteStartX = 18'(spriteReg_pos_x + spriteOffsetX);
+  wire [17:0] spriteStartY = 18'(spriteReg_pos_y + spriteOffsetY);
+  wire [17:0] blitterPosX = io_ctrl_pwrinst2 ? spriteReg_pos_x : {spriteStartX[17:8], 8'h00};
+  wire [17:0] blitterPosY = io_ctrl_pwrinst2 ? spriteReg_pos_y : {spriteStartY[17:8], 8'h00};
   wire signed [12:0] pwrinst2SpriteBudgetX =
     {{3{spriteReg_pos_x[17]}}, spriteReg_pos_x[17:8]};
   wire signed [12:0] pwrinst2SpriteBudgetY =
@@ -335,14 +378,23 @@ module SpriteProcessor(
           : io_ctrl_zoom
           ? (io_ctrl_regs_fixed ? zoomFixedPosY : zoomIntegerPosY)
           : (io_ctrl_regs_fixed ? normalFixedPosY : normalIntegerPosY);
-      spriteReg_cols <= io_ctrl_zoom ? {3'h0, io_ctrl_vram_dout[108:104]} : {3'h0, io_ctrl_vram_dout[76:72]};
-      spriteReg_rows <= io_ctrl_zoom ? {3'h0, io_ctrl_vram_dout[100:96]} : {3'h0, io_ctrl_vram_dout[68:64]};
-      spriteReg_zoom_x <= io_ctrl_zoom ? io_ctrl_vram_dout[79:64] : 16'h0100;
-      spriteReg_zoom_y <= io_ctrl_zoom ? io_ctrl_vram_dout[95:80] : 16'h0100;
+      spriteReg_cols <= {3'h0, latchCols};
+      spriteReg_rows <= {3'h0, latchRows};
+      spriteReg_zoom_x <= latchZoomX;
+      spriteReg_zoom_y <= latchZoomY;
+      spriteZoomedWidth <= 28'({19'h0, latchCols, 4'h0} * {12'h0, latchZoomX});
+      spriteZoomedHeight <= 28'({19'h0, latchRows, 4'h0} * {12'h0, latchZoomY});
     end
 
     if (stateReg == STATE_CHECK)
       numTilesReg <= spriteTileCount;
+
+    if (stateReg == STATE_CHECK) begin
+      spriteOffsetX <= zoomOffset(spriteWidth, spriteReg_zoom_x, spriteZoomedWidth,
+                                  spriteReg_hFlip, io_ctrl_regs_fixed);
+      spriteOffsetY <= zoomOffset(spriteHeight, spriteReg_zoom_y, spriteZoomedHeight,
+                                  spriteReg_vFlip, io_ctrl_regs_fixed);
+    end
   end
 
   CaveSyncQueue #(
@@ -386,6 +438,7 @@ module SpriteProcessor(
     .clock                           (clock),
     .reset                           (reset),
     .io_enable                       (io_ctrl_enable),
+    .io_frameStart                   (acceptedFrameStart),
     .io_busy                         (blitterBusy),
     .io_config_ready                 (blitterConfigReady),
     .io_config_valid                 (blitterConfigValid),
@@ -393,8 +446,8 @@ module SpriteProcessor(
     .io_config_bits_sprite_colorCode (spriteReg_colorCode),
     .io_config_bits_sprite_hFlip     (spriteReg_hFlip),
     .io_config_bits_sprite_vFlip     (spriteReg_vFlip),
-    .io_config_bits_sprite_pos_x     (spriteReg_pos_x),
-    .io_config_bits_sprite_pos_y     (spriteReg_pos_y),
+    .io_config_bits_sprite_pos_x     (blitterPosX),
+    .io_config_bits_sprite_pos_y     (blitterPosY),
     .io_config_bits_sprite_cols      (spriteReg_cols),
     .io_config_bits_sprite_rows      (spriteReg_rows),
     .io_config_bits_sprite_zoom_x    (spriteReg_zoom_x),
