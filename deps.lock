@@ -1,0 +1,5 @@
+# Pinned upstream revisions. Regenerate with tools/bootstrap.sh --update
+# 2026-10-13T07:30:07Z
+fx68k          jtfpga/fx68k 1217ab8dc600de070c6adb71ea6fe69de8855362
+pocket-utils   agg23/analogue-pocket-utils 78482d1b363606336f4535aa0adc2e957bc20558
+mame           mamedev/mame 344d163580b40a92767f187a58467fe6d0ec261f
