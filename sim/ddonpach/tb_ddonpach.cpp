@@ -5,6 +5,7 @@
 //          [--rom-lat N] [--spr-lat N] [--fb-lat N] [--all-frames]
 //          [--trace file] [--trace-count N] [--trace-data-only]
 //          [--prog file --replay N] [--wav file] [--ymz-log file] [--ymz-trace file]
+//          [--oki-log file] [--oki-samples prefix]
 //          [--press list]
 //
 // Hosts cave68000 (through sim/ddonpach/cave68000_sim.sv, which adds the
@@ -62,6 +63,14 @@
 // on> <clocks since the last sample begun> W <reg> <data> | S, then '+' (it
 // waits), 'b' (on the clock a sample begins) and, for a write, "applied
 // <clock>" – the clock the chip took it into its registers.
+//
+// Built with CAVE_OKI (sim/ddonpach/build.sh --oki), the board plays
+// DonPachi's two OKI M6295s instead. --oki-log writes the 68000's command
+// bytes and NMK112 bank writes in tools/mame_cave_oki.lua's format, each
+// access's time put in the middle of OKI 1's sample it lands on (one on the
+// clock a sample begins lands after it), so tools/pocket/oki_model.py can
+// play the board's own run back; --oki-samples writes each chip's samples
+// as the board made them, PREFIX.0 and PREFIX.1, int32 as the model's --out.
 //
 // --press holds inputs down over frame ranges, as tools/mame_cave_screens.lua's
 // PRESS does and by the same MAME field names: "400-405:Coin 1,600-605:1
@@ -123,6 +132,8 @@ int main(int argc, char** argv) {
     const char* prog_path = nullptr;
     int replay = -1;
     const char* wav_path = nullptr;
+    const char* oki_log_path = nullptr;
+    const char* oki_samples_path = nullptr;
     const char* ymz_log_path = nullptr;
     const char* ymz_trace_path = nullptr;
     struct Press { int from, to, port, bit; };     // port 0 p1, 1 p2, 2 coin, 3 start, 4 service, 5 pause
@@ -168,6 +179,8 @@ int main(int argc, char** argv) {
         else if (!strcmp(argv[i], "--prog") && i + 1 < argc)        prog_path = argv[++i];
         else if (!strcmp(argv[i], "--replay") && i + 1 < argc)      replay = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--wav") && i + 1 < argc)         wav_path = argv[++i];
+        else if (!strcmp(argv[i], "--oki-log") && i + 1 < argc)     oki_log_path = argv[++i];
+        else if (!strcmp(argv[i], "--oki-samples") && i + 1 < argc) oki_samples_path = argv[++i];
         else if (!strcmp(argv[i], "--ymz-log") && i + 1 < argc)     ymz_log_path = argv[++i];
         else if (!strcmp(argv[i], "--ymz-trace") && i + 1 < argc)   ymz_trace_path = argv[++i];
         else if (!strcmp(argv[i], "--press") && i + 1 < argc) {
@@ -333,6 +346,10 @@ int main(int argc, char** argv) {
     std::vector<int16_t> wav;
     FILE* ymz_log = ymz_log_path ? fopen(ymz_log_path, "w") : nullptr;
     if (ymz_log) fprintf(ymz_log, "# the board, game %d\n", game);
+    FILE* oki_log = oki_log_path ? fopen(oki_log_path, "w") : nullptr;
+    if (oki_log) fprintf(oki_log, "# the board, game %d\n", game);
+    long oki_begun = 0;                 // OKI 1's samples begun
+    std::vector<int32_t> oki_out[2];
     long snd_started = 0;               // samples begun
     uint64_t snd_begin = 0, snd_max_f = 0, snd_late_f = 0, snd_late = 0;
     bool snd_busy_prev = false, ymz_wr_prev = false, ymz_rd_prev = false;
@@ -562,6 +579,21 @@ int main(int argc, char** argv) {
             }
             ymz_wr_prev = t->dbg_ymz_wr;
             ymz_rd_prev = t->dbg_ymz_rd;
+
+            // DonPachi's OKIs: an access on the clock a sample begins lands after it
+            {
+                long lands = oki_begun + (t->dbg_oki_tick ? 1 : 0);
+                double at = (lands + 0.5) / 15984.0;
+                if (oki_log) {
+                    if (t->dbg_oki_wr0) fprintf(oki_log, "%.12f W 0 %02x\n", at, t->dbg_oki_din);
+                    if (t->dbg_oki_wr1) fprintf(oki_log, "%.12f W 1 %02x\n", at, t->dbg_oki_din);
+                    if (t->dbg_nmk_wr) fprintf(oki_log, "%.12f N %d %02x\n", at, t->dbg_nmk_addr, t->dbg_oki_din);
+                }
+                if (t->dbg_oki_tick) oki_begun++;
+                auto s20 = [](uint32_t v) { return (int32_t)(v << 12) >> 12; };
+                if (t->dbg_oki_sv0) oki_out[0].push_back(s20(t->dbg_oki_s0));
+                if (t->dbg_oki_sv1) oki_out[1].push_back(s20(t->dbg_oki_s1));
+            }
         }
 
         // ---- video capture, at each clk_vid edge
@@ -644,6 +676,7 @@ int main(int argc, char** argv) {
                 fprintf(stats, "\n");
                 fflush(stats);
                 if (ymz_log) fprintf(ymz_log, "# frame %d %.12f\n", frame, (snd_started + 0.5) / snd_rate);
+                if (oki_log) fprintf(oki_log, "# frame %d %.12f\n", frame, (oki_begun + 0.5) / 15984.0);
                 bus_f = irq_f = swap_f = sprb_f = fbr_f = fbw_f = 0;
                 snd_max_f = snd_late_f = 0;
                 max_wait = 0; max_wait_addr = 0;
@@ -668,6 +701,15 @@ int main(int argc, char** argv) {
     if (trace) fclose(trace);
     fclose(stats);
     if (ymz_log) fclose(ymz_log);
+    if (oki_log) fclose(oki_log);
+    if (oki_samples_path)
+        for (int c = 0; c < 2; c++) {
+            std::string fn = std::string(oki_samples_path) + "." + std::to_string(c);
+            FILE* f = fopen(fn.c_str(), "wb");
+            if (!f) { perror(fn.c_str()); return 1; }
+            fwrite(oki_out[c].data(), 4, oki_out[c].size(), f);
+            fclose(f);
+        }
     if (ymz_trace) fclose(ymz_trace);
     if (wav_path) {
         FILE* f = fopen(wav_path, "wb");

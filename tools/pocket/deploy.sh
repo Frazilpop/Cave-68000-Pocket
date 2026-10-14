@@ -5,7 +5,8 @@
 #   tools/pocket/deploy.sh --status                   is the current build on the card?
 #   tools/pocket/deploy.sh --full                     compare every ROM image on the card byte for byte
 #
-# Copies pocket/dist ("Cores/frazilpop.Cave 68000" with the bitstream, the
+# Copies pocket/dist ("Cores/frazilpop.Cave 68000" with the two bitstreams –
+# bitstream.rbf_r for the YMZ280B games, donpachi.rbf_r for DonPachi's sets – the
 # platform JSON and image, the instance JSONs under Assets/cave68000/) onto the
 # Pocket's SD card, and each target set's build/pocket/<set>.rom (made by
 # tools/pocket/build_rom.py) to Assets/cave68000/common/. A ROM image already on
@@ -29,11 +30,14 @@ CORE="frazilpop.Cave 68000"
 PLATFORM="cave68000"
 DIST="$REPO/pocket/dist"
 BIN="$DIST/Cores/$CORE/bitstream.rbf_r"
+BIN_OKI="$DIST/Cores/$CORE/donpachi.rbf_r"     # pocket/build.sh --oki
 ROMS="$REPO/build/pocket"
 RECORD="$ROMS/deployed.txt"
 ROMREC="$ROMS/deployed-roms.txt"
-SETS="ddonpach ddonpachj esprade espradej espradejo guwange guwanges feversos dfeveron uopoko uopokoj gaia theroes theroesa"      # the target sets
+SETS="ddonpach ddonpachj esprade espradej espradejo guwange guwanges feversos dfeveron uopoko uopokoj gaia theroes theroesa
+      donpachi donpachij donpachijs donpachikr donpachihk"      # the target sets
 [ -f "$BIN" ] || { echo "no $BIN - run pocket/build.sh first"; exit 1; }
+[ -f "$BIN_OKI" ] || echo "Warning: no $BIN_OKI - DonPachi's sets will not start (pocket/build.sh --oki)"
 
 VOL="" STATUS=0 FULL=0
 for a in "$@"; do
@@ -159,8 +163,14 @@ done
 
 a=$(sha "$BIN") b=$(sha "$VOL/Cores/$CORE/bitstream.rbf_r")
 [ "$a" = "$b" ] || { echo "the bitstream on the card differs from the build"; exit 1; }
+oki=none
+if [ -f "$BIN_OKI" ]; then
+	oki=$(sha "$BIN_OKI")
+	[ "$oki" = "$(sha "$VOL/Cores/$CORE/donpachi.rbf_r")" ] || { echo "donpachi.rbf_r on the card differs from the build"; exit 1; }
+	echo "DonPachi's bitstream SHA-256 verified on the card (built $(stat -f '%Sm' -t '%Y-%m-%d %H:%M' "$BIN_OKI"))"
+fi
 mkdir -p "$ROMS"
-printf 'sha256 %s\nbuilt %s\ncommit %s\ndeployed %s\n' "$a" "$(built)" \
-	"$(git -C "$REPO" log -1 --format=%h 2>/dev/null)" "$(date '+%Y-%m-%d %H:%M')" >"$RECORD"
+printf 'sha256 %s\nbuilt %s\ncommit %s\ndeployed %s\noki_sha256 %s\n' "$a" "$(built)" \
+	"$(git -C "$REPO" log -1 --format=%h 2>/dev/null)" "$(date '+%Y-%m-%d %H:%M')" "$oki" >"$RECORD"
 echo "Bitstream SHA-256 verified on the card: the build of $(built) is on $VOL"
 echo "Left $VOL mounted - eject it yourself, then back in the Pocket and launch: openFPGA > Arcade > Cave 68000"

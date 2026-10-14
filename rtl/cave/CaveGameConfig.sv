@@ -3,6 +3,11 @@
 
 // Hand-maintained copy of the legacy Chisel GameConfig.scala values.
 // Keep this aligned while retiring the Chisel-generated Cave.sv internals.
+//
+// Cave 68000 for Analogue Pocket: upstream's values but for DonPachi's, whose
+// image (tools/pocket/build_rom.py) holds MAME's whole 3 MB region for the
+// second OKI and the NMK112's fold of it, 4 MB at sound_1_rom_offset, where
+// upstream's MRA had 1 MB; its layers and sprites start 3 MB later.
 module CaveGameConfig (
   input      [3:0]  game_index,
   output reg [8:0]  granularity,
@@ -100,16 +105,16 @@ module CaveGameConfig (
         sound_1_rom_offset  = 32'h0028_0080;
         sound_2_rom_offset  = 32'h0000_0000;
         layer_0_format      = GFX_FORMAT_4BPP;
-        layer_0_rom_offset  = 32'h0038_0080;
+        layer_0_rom_offset  = 32'h0068_0080;
         layer_0_palette_bank = 2'h1;
         layer_1_format      = GFX_FORMAT_4BPP;
-        layer_1_rom_offset  = 32'h0048_0080;
+        layer_1_rom_offset  = 32'h0078_0080;
         layer_1_palette_bank = 2'h1;
         layer_2_format      = GFX_FORMAT_4BPP;
-        layer_2_rom_offset  = 32'h0058_0080;
+        layer_2_rom_offset  = 32'h0088_0080;
         layer_2_palette_bank = 2'h1;
         sprite_format       = GFX_FORMAT_4BPP_MSB;
-        sprite_rom_offset   = 32'h005c_0080;
+        sprite_rom_offset   = 32'h008c_0080;
         sprite_zoom         = 1'b0;
       end
 

@@ -22,7 +22,8 @@ The scratch RAM is not shown, so it is not loaded.
 
 --mame-budget clears the entries MAME's 013 never reached: sprite013 charges
 32 clocks an entry plus the source pixels (every sized entry on the zoom
-format, on-screen ones only on ddonpach's) against 448 x 272 x 2 and stops
+format, on-screen ones only on ddonpach's and donpachi's) against 448 x 272
+x 2 and stops
 drawing when they run out (as tools/mame_cave_sprite_load.lua models it).
 The board has no such budget; with the list cut where MAME's ran out, a
 frame MAME cut must match too. Going through the bus
@@ -48,13 +49,17 @@ MAPS = {
                    sprites=0x400000, palette=0x800000),
     "feversos": dict(layers=[0x500000, 0x600000], lregs=[0x900000, 0xA00000],
                      vregs=0x800000, sprites=0x400000, palette=0x708000),
+    "donpachi": dict(layers=[0x300000, 0x200000, 0x400000], lregs=[0x700000, 0x600000, 0x800000],
+                     vregs=0x900000, sprites=0x500000, palette=0xA08000, prog=0x80000),
 }
 PARENT = {"ddonpachj": "ddonpach", "espradej": "esprade", "espradejo": "esprade",
           "guwanges": "guwange", "uopokoj": "uopoko", "dfeveron": "feversos",
-          "theroes": "gaia", "theroesa": "gaia"}
+          "theroes": "gaia", "theroesa": "gaia",
+          "donpachij": "donpachi", "donpachijs": "donpachi", "donpachikr": "donpachi",
+          "donpachihk": "donpachi"}
 
 ENTRY, LOADED_PC, TABLE, DATA = 0x000400, 0x000500, 0x001000, 0x002000
-PROG_SIZE = 0x100000
+PROG_SIZE = 0x100000                # the program region (donpachi: 0x80000, MAPS' prog)
 
 # The loader. a2 walks a table of (words, source, destination) longs, ended
 # by a zero count; one word moved at a time, as the game itself writes.
@@ -169,14 +174,15 @@ def main():
     cut = 1024
     if budget:
         base = bank * 0x2000
-        cut = budget_cut(sprites, base, PARENT.get(s, s) == "ddonpach", vregs[5],
+        cut = budget_cut(sprites, base, PARENT.get(s, s) in ("ddonpach", "donpachi"), vregs[5],
                          info["width"], info["height"])
         sprites[base + 8 * cut: base + 0x2000] = [0] * (0x2000 - 8 * cut)
     copies.append((m["sprites"], sprites))
     vregs[4] = (vregs[4] & ~3) | bank
     copies.append((m["vregs"], vregs))
 
-    rom = bytearray(PROG_SIZE)
+    size = m.get("prog", PROG_SIZE)
+    rom = bytearray(size)
     rom[0:8] = struct.pack(">II", 0, ENTRY)
     rom[ENTRY:ENTRY + len(CODE)] = CODE
     rom[LOADED_PC:LOADED_PC + len(SPIN)] = SPIN
@@ -187,7 +193,7 @@ def main():
         src += 2 * len(w)
     table.append(struct.pack(">I", 0))
     t = b"".join(table)
-    assert TABLE + len(t) <= DATA and src <= PROG_SIZE
+    assert TABLE + len(t) <= DATA and src <= size
     rom[TABLE:TABLE + len(t)] = t
     open(out, "wb").write(rom)
     print(f"{out}: {s} frame {info['frame']}, {len(copies)} copies, "

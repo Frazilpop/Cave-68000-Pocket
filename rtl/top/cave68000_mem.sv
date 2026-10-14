@@ -6,7 +6,7 @@
 // that what comes out are the Pocket's own ports, and nothing else changes:
 //
 //   rom   seven read ports for kaneko_sdram, one 64-bit line a request:
-//         0 the program, 1 the YMZ280B's samples, 2-4 the three layers'
+//         0 the program, 1 the YMZ280B's samples (DonPachi's OKIs'), 2-4 the three layers'
 //         tiles (each through upstream's cache, cave_line_port), 5-6 the
 //         sprite tiles (cave_spr_port, a tile's 16 or 32 lines on two ports
 //         in turn). Addresses are whole-image word addresses: the region

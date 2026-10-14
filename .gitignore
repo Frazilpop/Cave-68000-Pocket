@@ -44,6 +44,9 @@ qdb/
 *.sta
 *.asm
 /pocket/dist/Cores/*/bitstream.rbf_r
+/pocket/dist/Cores/*/donpachi.rbf_r
+# DonPachi's revision, written from ap_core.qsf by pocket/build.sh --oki
+/pocket/src/fpga/ap_core_oki.qsf
 
 # --------------------------------------------------------------- verilator
 obj_dir/

@@ -136,13 +136,34 @@ GAIA_MAP = COMMON + [
     (0xd00012, 0xd00014, "IN1       d00012"),
     (0xd00014, 0xd00016, "DSW/wdog  d00014"),
 ]
+# DonPachi's map is its own: layer 2 at 400000 and the sprites at 500000
+DONPACHI_MAP = COMMON[:1] + [
+    (0x100000, 0x110000, "work ram  100000-10ffff"),
+    (0x200000, 0x208000, "layer1    200000-207fff"),
+    (0x300000, 0x308000, "layer0    300000-307fff"),
+    (0x400000, 0x408000, "layer2    400000-407fff (8x8, mirrored)"),
+    (0x500000, 0x510000, "sprites   500000-50ffff"),
+    (0x600000, 0x600006, "layer1 r  600000-600005"),
+    (0x700000, 0x700006, "layer0 r  700000-700005"),
+    (0x800000, 0x800006, "layer2 r  800000-800005"),
+    (0x900000, 0x900008, "irq cause 900000-900007"),
+    (0x900008, 0x900080, "videoregs 900008-90007f"),
+    (0xa08000, 0xa09000, "palette   a08000-a08fff"),
+    (0xb00000, 0xb00004, "oki 0     b00000-b00003"),
+    (0xb00010, 0xb00014, "oki 1     b00010-b00013"),
+    (0xb00020, 0xb00030, "nmk112    b00020-b0002f"),
+    (0xc00000, 0xc00002, "IN0       c00000"),
+    (0xc00002, 0xc00004, "IN1+eeprm c00002"),
+    (0xd00000, 0xd00002, "eeprom w  d00000"),
+]
 MAP_OF = {}
 for sets, m in ((("ddonpach", "ddonpachj"), DDONPACH_MAP),
                 (("esprade", "espradej", "espradejo"), ESPRADE_MAP),
                 (("guwange", "guwanges"), GUWANGE_MAP),
                 (("feversos", "dfeveron"), DFEVERON_MAP),
                 (("uopoko", "uopokoj"), UOPOKO_MAP),
-                (("gaia", "theroes", "theroesa"), GAIA_MAP)):
+                (("gaia", "theroes", "theroesa"), GAIA_MAP),
+                (("donpachi", "donpachij", "donpachijs", "donpachikr", "donpachihk"), DONPACHI_MAP)):
     MAP_OF.update({s: m for s in sets})
 
 

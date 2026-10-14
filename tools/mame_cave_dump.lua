@@ -14,12 +14,12 @@
 --
 -- Files (16-bit data as little-endian u16 words, as Mille Miglia's dumps):
 --   palette.bin          the palette RAM (0x8000 xGRB_555 entries; 0x800 on
---                        feversos/dfeveron)
+--                        feversos/dfeveron and donpachi)
 --   layer<N>_vram16.bin  038 chip N: the 16 x 16 tile map (0x0000-0x0fff)
 --   layer<N>_line.bin    line RAM, row-scroll / row-select (0x1000-0x17ff)
 --   layer<N>_scratch.bin the scratch RAM (0x1800-0x3fff)
---   layer<N>_vram8.bin   the 8 x 8 tile map (0x4000-0x7fff; ddonpach's layer
---                        2 has only this, 0x4000 bytes)
+--   layer<N>_vram8.bin   the 8 x 8 tile map (0x4000-0x7fff; ddonpach's and
+--                        donpachi's layer 2 has only this, 0x4000 bytes)
 --   layer<N>_regs.bin    the chip's three control words
 --   videoregs.bin        the 013's 64 registers (the bus maps them write-only:
 --                        a read there is the IRQ cause)
@@ -91,8 +91,9 @@ assert(not SET or SET == romname, "DUMP_SET=" .. tostring(SET) .. " but running 
 local IRQ_US = { ddonpach = 90, ddonpachj = 90, feversos = 100, dfeveron = 100,
                  esprade = 2000, espradej = 2000, espradejo = 2000,
                  guwange = 2000, guwanges = 2000, uopoko = 2000, uopokoj = 2000,
-                 gaia = 2000, theroes = 2000, theroesa = 2000 }
-assert(IRQ_US[romname], "mame_cave_dump.lua is for the YMZ280B Cave board, not " .. romname)
+                 gaia = 2000, theroes = 2000, theroesa = 2000,
+                 donpachi = 90, donpachij = 90, donpachijs = 90, donpachikr = 90, donpachihk = 90 }
+assert(IRQ_US[romname], "mame_cave_dump.lua is for the Cave 68000 board's sets, not " .. romname)
 local FRAME_S = 0.017376
 
 local cpu   = mach.devices[":maincpu"]

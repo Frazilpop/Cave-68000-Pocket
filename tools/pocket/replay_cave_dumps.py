@@ -8,7 +8,8 @@
 For each f<NNNNN> under DUMPDIR (tools/mame_cave_dump.lua's) that recorded a
 sprite draw – or the frames listed, comma-separated – this builds the loader
 (cave_dump_loader.py), runs the harness on build/pocket/SET.rom with it
-(build/obj_ddonpach/tb_ddonpach --prog --replay; sim/ddonpach/build.sh first)
+(build/obj_ddonpach/tb_ddonpach --prog --replay; sim/ddonpach/build.sh first;
+DonPachi's sets build/obj_donpachi/tb_ddonpach, sim/ddonpach/build.sh --oki)
 and holds what the board shows against MAME:
 
   picture   frame_N.ppm against screen.png (RGB, 320 x the screen's height)
@@ -38,9 +39,11 @@ from PIL import Image
 
 GAME = {"dfeveron": 0, "feversos": 0, "ddonpach": 1, "ddonpachj": 1,
         "esprade": 3, "espradej": 3, "espradejo": 3, "uopoko": 4, "uopokoj": 4,
-        "guwange": 5, "guwanges": 5, "gaia": 6, "theroes": 6, "theroesa": 6}
+        "guwange": 5, "guwanges": 5, "gaia": 6, "theroes": 6, "theroesa": 6,
+        "donpachi": 2, "donpachij": 2, "donpachijs": 2, "donpachikr": 2, "donpachihk": 2}
 HERE = os.path.dirname(os.path.abspath(__file__))
 TB = "build/obj_ddonpach/tb_ddonpach"
+OKI_SETS = ("donpachi", "donpachij", "donpachijs", "donpachikr", "donpachihk")
 
 
 def main():
@@ -63,6 +66,8 @@ def main():
     if len(args) < 2:
         sys.exit(__doc__)
     setname, dumpdir = args[0], args[1]
+    if setname in OKI_SETS:            # DonPachi's board: sim/ddonpach/build.sh [--pocket] --oki
+        TB = TB.replace("obj_ddonpach", "obj_donpachi").replace("obj_pocket/", "obj_pocket_oki/")
     out = out or os.path.join("build/sim/replay", setname)
     os.makedirs(out, exist_ok=True)
     if len(args) > 2:

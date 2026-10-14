@@ -12,7 +12,10 @@ that with tools/mame_cave_regions.lua (dumps into build/mame/regions/<set>/,
 skipped with --no-mame if they are already there),
 then compares every region of the .rom image with MAME's:
 
-  * prog, layer0-2, ymz, eeprom – the slice must equal MAME's region exactly.
+  * prog, layer0-2, ymz, oki0, eeprom – the slice must equal MAME's region
+    exactly.
+  * oki1 (DonPachi's second OKI) – the first 3 MB must equal MAME's oki2, the
+    last 1 MB its 2-3 MB again (the NMK112's pages 48-63 are 32-47).
   * sprites – the image keeps the files as the MiSTer core reads them
     (build_rom.py), MAME's region is what ROM_LOAD16_WORD_SWAP (ddonpach) or
     ROM_LOAD32_WORD_SWAP (esprade, guwange) made of the same files, so the
@@ -39,8 +42,8 @@ import build_rom  # noqa: E402  (our own module, beside this file)
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 LUA = os.path.join(REPO, "tools", "mame_cave_regions.lua")
-MAME_NAME = {"prog": "maincpu", "eeprom": "eeprom", "ymz": "ymz", "layer0": "layer0",
-             "layer1": "layer1", "layer2": "layer2", "sprites": "sprites0"}
+MAME_NAME = {"prog": "maincpu", "eeprom": "eeprom", "ymz": "ymz", "oki0": "oki1", "oki1": "oki2",
+             "layer0": "layer0", "layer1": "layer1", "layer2": "layer2", "sprites": "sprites0"}
 
 
 def stage_rompath(setname, index):
@@ -55,7 +58,7 @@ def stage_rompath(setname, index):
     prefer = [setname] + ([spec["parent"]] if spec["parent"] else [])
     for _, ops in spec["regions"].values():
         for op in ops:
-            files = [(op[1], op[2], op[4])] if op[0] in ("L", "B") else [(op[1][0], op[1][1], op[4]), (op[2][0], op[2][1], op[4])]
+            files = [(op[1], op[2], op[4])] if op[0] in ("L", "B", "W", "P") else [(op[1][0], op[1][1], op[4]), (op[2][0], op[2][1], op[4])]
             for name, crc, size in files:
                 path = os.path.join(d, name)
                 if os.path.exists(path) and os.path.getsize(path) == size:
@@ -89,7 +92,7 @@ def to_mame_order(setname, rname, data):
         return data
     game = build_rom.SETS[setname]["game"]
     out = bytearray(len(data))
-    if game == 1:                       # ddonpach: ROM_LOAD16_WORD_SWAP
+    if game in (1, 2):                  # ddonpach, donpachi: ROM_LOAD16_WORD_SWAP
         out[0::2] = data[1::2]
         out[1::2] = data[0::2]
         return bytes(out)
@@ -134,6 +137,8 @@ def verify(setname, romdir, dumpdir):
     lines = []
     for rname, base, size in table:
         mame = open(os.path.join(dumpdir, f"{MAME_NAME[rname]}.bin"), "rb").read()
+        if rname == "oki1" and len(mame) == 0x300000:
+            mame = mame + mame[0x200000:]     # the NMK112's pages 48-63
         mine = to_mame_order(setname, rname, img[base:base + size])
         note = " (through the sprite permutation)" if rname == "sprites" and mine != img[base:base + size] else ""
         if len(mame) != size:
