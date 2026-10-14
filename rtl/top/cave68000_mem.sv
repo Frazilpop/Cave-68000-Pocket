@@ -83,6 +83,7 @@ module cave68000_mem #(
 
   // diagnostics
   output wire          spr_swap,         // clk_cpu: the sprite page swap
+  output wire          cpu_as,           // clk_cpu: the 68000's address strobe
   input  wire          diag_clr,         // clk: peaks back to zero
   output wire [15:0]   fb_rows_written,
   output wire [15:0]   fb_rows_read,
@@ -151,7 +152,7 @@ module cave68000_mem #(
     .ee_dout (ee_dout), .ee_wait_n (1'b1), .ee_valid (ee_valid),
     .ce_pix (ce_pix), .hs (hs), .vs (vs), .hblank (hblank), .vblank (vblank), .de (de),
     .r (r), .g (g), .b (b), .snd (snd), .snd_sample (snd_sample), .snd_overrun (snd_overrun),
-    .spr_swap (spr_swap)
+    .spr_swap (spr_swap), .cpu_as (cpu_as)
   );
 
   // ------------------------------------------------------ the five caches

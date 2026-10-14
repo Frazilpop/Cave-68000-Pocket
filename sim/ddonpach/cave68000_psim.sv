@@ -88,7 +88,7 @@ module cave68000_psim #(
     .nv_addr (6'd0), .nv_din (16'd0), .nv_we (1'b0), .nv_dout (), .nv_dirty (), .nv_dirty_clr (1'b0),
     .ce_pix (ce_pix), .hs (hs), .vs (vs), .hblank (hblank), .vblank (vblank), .de (de),
     .r (r), .g (g), .b (b), .snd (snd), .snd_sample (snd_sample), .snd_overrun (snd_overrun),
-    .spr_swap (), .diag_clr (1'b0), .fb_rows_written (fb_rows_written), .fb_rows_read (fb_rows_read),
+    .spr_swap (), .cpu_as (), .diag_clr (1'b0), .fb_rows_written (fb_rows_written), .fb_rows_read (fb_rows_read),
     .fb_rd_wait_max (fb_rd_wait_max)
   );
 

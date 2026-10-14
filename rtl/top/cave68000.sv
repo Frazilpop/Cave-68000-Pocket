@@ -116,8 +116,9 @@ module cave68000 (
   output wire        snd_overrun,
 
   // Diagnostics, on clk_cpu: the sprite frame buffer's page swap (the 68000
-  // asking for the next frame of sprites)
-  output wire        spr_swap
+  // asking for the next frame of sprites) and the 68000's address strobe
+  output wire        spr_swap,
+  output wire        cpu_as
 );
 
   // ------------------------------------------------------------- the game
@@ -448,6 +449,7 @@ module cave68000 (
     .io_ss_reconstruction_ready             (),
     .io_ss_blocked_access                   (),
     .io_service_debug                       (),
+    .io_cpu_as                              (cpu_as),
     .io_ssbus                               (ssMain),
     .io_debug_pipeline                      (),
     .io_debug_cpu                           (),

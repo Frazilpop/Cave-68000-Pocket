@@ -28,7 +28,10 @@
 //
 // Writes frame_NNNNN.ppm (320 x 240, as the board puts it out) for each
 // requested frame, and one line per frame to stats.csv. Frames count from 1
-// at the first vblank, as MAME's frame notifier does.
+// at the first vblank, as MAME's frame notifier does. stats.csv's as_clk is
+// the clk_cpu clocks the 68000 held AS that frame: with bus_cycles, what its
+// bus cycles cost beyond the shortest. AS_HIST=1 prints how long AS was held,
+// cycle by cycle, at the end.
 //
 // --trace writes the 68000's bus in tools/mame_cave_bus_trace.lua's format:
 // one line per bus cycle, at the end of the cycle; interrupt acknowledges
@@ -299,7 +302,7 @@ int main(int argc, char** argv) {
     int x = 0, y = 0, frame = 1;
     int prev_hb = 1, prev_vb = 1;
     FILE* stats = fopen((outdir + "/stats.csv").c_str(), "w");
-    fprintf(stats, "frame,cycles,bus_cycles,max_wait,max_wait_addr,irqs,swaps,spr_bursts,fb_rd_bursts,fb_wr_beats,snd_max_clocks,snd_late");
+    fprintf(stats, "frame,cycles,bus_cycles,max_wait,max_wait_addr,irqs,swaps,spr_bursts,fb_rd_bursts,fb_wr_beats,snd_max_clocks,snd_late,as_clk");
 #ifdef POCKET_MEM
     fprintf(stats, ",draw_clk,fb_rd_wait,wait_prog,wait_snd,wait_l0,wait_l1,wait_l2,wait_spr0,wait_spr1");
 #endif
@@ -324,6 +327,8 @@ int main(int argc, char** argv) {
     uint32_t rec_a = 0, rec_d = 0, rec_m = 0; bool rec_rd = false, rec_iack = false;
     uint64_t as_start = 0, max_wait = 0; uint32_t max_wait_addr = 0; bool waiting = false;
     uint64_t bus_f = 0, irq_f = 0, swap_f = 0, sprb_f = 0, fbr_f = 0, fbw_f = 0;
+    std::vector<uint64_t> as_hist(64, 0);       // AS held, clk_cpu clocks, by length
+    uint64_t as_clk_f = 0;                      // AS held this frame, clk_cpu clocks
     bool swap_prev = false;
 #ifdef POCKET_MEM
     uint16_t rows_w_prev = t->fb_rows_written, rows_r_prev = t->fb_rows_read;
@@ -461,6 +466,10 @@ int main(int argc, char** argv) {
                 rec_iack = t->dbg_fc == 7;
                 have_rec = true;
             }
+            if (!as && as_prev) {
+                as_hist[std::min<uint64_t>((cyc - as_start) / 3, 63)]++;
+                as_clk_f += (cyc - as_start) / 3;
+            }
             if (!as && as_prev && have_rec) {
                 if (trace && !rec_iack && !(trace_data_only && rec_a >= 0x400 && rec_a < 0x100000)) {
                     fprintf(trace, "%06x %c %04x %04x\n", rec_a, rec_rd ? 'R' : 'W', rec_d, rec_m);
@@ -574,6 +583,8 @@ int main(int argc, char** argv) {
                         (unsigned long long)irq_f, (unsigned long long)swap_f,
                         (unsigned long long)sprb_f, (unsigned long long)fbr_f, (unsigned long long)fbw_f,
                         (unsigned long long)snd_max_f, (unsigned long long)snd_late_f);
+                fprintf(stats, ",%llu", (unsigned long long)as_clk_f);
+                as_clk_f = 0;
 #ifdef POCKET_MEM
                 // the longest draw (clk from a swap to the last row written
                 // after it) and the longest a line read waited for its first row
@@ -637,6 +648,8 @@ int main(int argc, char** argv) {
     if (getenv("LAT_HIST"))
         for (int i = 0; i < 128; i++) if (lat_hist[i]) fprintf(stderr, "  layer line read %3d clk: %llu\n", i, (unsigned long long)lat_hist[i]);
 #endif
+    if (getenv("AS_HIST"))
+        for (int i = 0; i < 64; i++) if (as_hist[i]) fprintf(stderr, "  AS held %2d clk_cpu: %llu\n", i, (unsigned long long)as_hist[i]);
     if (replay >= 0 && !replay_done) {
         fprintf(stderr, loaded_frame < 0 ? "the loader never finished\n" : "ran out of frames\n");
         return 1;
