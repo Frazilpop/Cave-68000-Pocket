@@ -29,7 +29,9 @@
 
 `default_nettype none
 
-module cave_eeprom_store (
+module cave_eeprom_store #(
+  parameter int unsigned AW = 25       // the loader's word address [AW:1]: the whole SDRAM
+) (
   input  wire         clk,
   input  wire         rst,
 
@@ -38,7 +40,7 @@ module cave_eeprom_store (
 
   // the loader's stream: one 16-bit word of the image, at a word address
   input  wire         dl_wr,
-  input  wire [24:1]  dl_addr,
+  input  wire [AW:1]  dl_addr,
   input  wire [15:0]  dl_data,
 
   // the board's side (upstream's ee port)
@@ -60,9 +62,12 @@ module cave_eeprom_store (
 
   reg [15:0] mem [0:63];
 
-  wire [24:1] seed_base = eeprom_offset[24:1];
-  wire [24:1] seed_rel  = dl_addr - seed_base;
-  wire        seed_hit  = has_eeprom && dl_wr && (dl_addr >= seed_base) && (seed_rel < 24'd64);
+  // The whole address is compared: an image larger than 32 MB (esprade's
+  // 43, guwange's 55) passes the region's address modulo 32 MB again, and a
+  // narrower compare took those sprite words as the seed.
+  wire [AW:1] seed_base = eeprom_offset[AW:1];
+  wire [AW:1] seed_rel  = dl_addr - seed_base;
+  wire        seed_hit  = has_eeprom && dl_wr && (dl_addr >= seed_base) && (seed_rel < 64);
 
   // ------------------------------------------------------- board's port
   wire [5:0] ee_w = ee_addr[6:1];

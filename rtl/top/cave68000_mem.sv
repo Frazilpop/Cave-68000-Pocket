@@ -60,7 +60,7 @@ module cave68000_mem #(
 
   // the loader's stream
   input  wire          dl_wr,
-  input  wire [24:1]   dl_addr,
+  input  wire [AW:1]   dl_addr,
   input  wire [15:0]   dl_data,
 
   // the save slot
@@ -212,7 +212,7 @@ module cave68000_mem #(
   );
 
   // ----------------------------------------------------------- the 93C46
-  cave_eeprom_store ee (
+  cave_eeprom_store #(.AW(AW)) ee (
     .clk (clk), .rst (rst),
     .eeprom_offset (off_ee), .has_eeprom (game != 3'd6),
     .dl_wr (dl_wr), .dl_addr (dl_addr), .dl_data (dl_data),
