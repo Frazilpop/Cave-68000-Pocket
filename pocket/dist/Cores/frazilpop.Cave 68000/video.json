@@ -13,8 +13,8 @@
             {
                 "width": 320,
                 "height": 240,
-                "aspect_w": 3,
-                "aspect_h": 4,
+                "aspect_w": 4,
+                "aspect_h": 3,
                 "rotation": 90,
                 "mirror": 0
             },
