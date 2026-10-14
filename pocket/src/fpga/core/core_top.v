@@ -660,12 +660,24 @@ localparam [15:0] DSW = 16'hfffb;
 //   p1/p2 = {b4,b3,b2,b1,right,left,down,up} is exactly key[7:0]:
 //   up, down, left, right, A (button 1, shot), B (button 2, bomb), X (button
 //   3), Y (button 4, gaia and theroes). Select is the coin, Start is start.
+//
+// R (key[9], trig_r1) is rapid shot: button 1 pressed on one frame and
+// released on the next, toggled once a frame at the end of vblank (below).
+// The games read their buttons once a frame, each at its own point in it, so
+// they see a new press every other frame, the fastest they can use: in
+// MAME's ddonpach that is shots and never the laser, the same score as two
+// frames on and two off. A wins: button 1 is A or the rapid press, so A and
+// R together are the button held. The phase rests pressed while R is up, so
+// R fires on the frame it is pressed.
 wire [15:0] k1, k2;
 synch_3 #(.WIDTH(16)) s_k1 (.i(cont1_key[15:0]), .o(k1), .clk(clk_cpu), .rise(), .fall());
 synch_3 #(.WIDTH(16)) s_k2 (.i(cont2_key[15:0]), .o(k2), .clk(clk_cpu), .rise(), .fall());
 
-wire [7:0] in_p1    = k1[7:0];
-wire [7:0] in_p2    = k2[7:0];
+reg  [1:0] rapid    = 2'b11;                //   {p2, p1}: the rapid press's phase
+wire [1:0] rapid_b1 = {k2[9], k1[9]} & rapid;
+
+wire [7:0] in_p1    = k1[7:0] | {3'd0, rapid_b1[0], 4'd0};
+wire [7:0] in_p2    = k2[7:0] | {3'd0, rapid_b1[1], 4'd0};
 wire [1:0] in_coin  = {k2[14], k1[14]};
 wire [1:0] in_start = {k2[15], k1[15]};
 
@@ -1098,6 +1110,14 @@ always @(posedge clk_cpu) begin
         if (cpu_as)  as_seen <= 1'b1;
     end
     if (rst_cpu || diag_clr_cpu) cw_max <= 32'd0;
+end
+
+// Rapid shot's phase (inputs, above): flipped at the end of vblank, clear
+// of the reads made as vblank begins (ddonpach's, in its interrupt).
+always @(posedge clk_cpu) begin
+    if (!vb_cpu && vb_cpu_q) rapid <= ~rapid;
+    if (!k1[9]) rapid[0] <= 1'b1;
+    if (!k2[9]) rapid[1] <= 1'b1;
 end
 
 wire [63:0] exp_line = {exp_w3, exp_w2, exp_w1, exp_w0};
