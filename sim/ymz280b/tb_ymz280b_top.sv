@@ -30,6 +30,7 @@ module tb_ymz280b_top (
     .clock            (clock),
     .reset            (reset),
     .io_clock16m      (clock16m),
+    .io_pause         (1'b0),
     .io_ctrl_ymz_rd   (cpu_rd),
     .io_ctrl_ymz_wr   (cpu_wr),
     .io_ctrl_ymz_addr ({22'd0, cpu_addr}),

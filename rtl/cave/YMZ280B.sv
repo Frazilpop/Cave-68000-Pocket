@@ -25,6 +25,7 @@ module YMZ280B #(
   input         clock,
   input         reset,
   input         io_clock16m,          // the chip on 16 MHz (gaia, theroes), not 16.9344
+  input         io_pause,             // the board paused: no sample begun
   input         io_cpu_rd,
   input         io_cpu_wr,
   input         io_cpu_addr,
@@ -198,6 +199,7 @@ module YMZ280B #(
     .io_access      (access),
     .io_update      (update20),
     .io_hold        (queueCount != 4'd0),
+    .io_pause       (io_pause),
     .io_busy        (channelBusy),
     .io_index       (ch),
     .io_fnum        (fnum[ch]),

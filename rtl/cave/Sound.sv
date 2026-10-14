@@ -17,6 +17,7 @@ module Sound #(
   input         clock,
   input         reset,
   input         io_clock16m,          // gaia and theroes: the chip on 16 MHz
+  input         io_pause,             // the board paused: the chip stands still
   input         io_ctrl_ymz_rd,
   input         io_ctrl_ymz_wr,
   input  [22:0] io_ctrl_ymz_addr,
@@ -41,6 +42,7 @@ module Sound #(
     .clock          (clock),
     .reset          (reset),
     .io_clock16m    (io_clock16m),
+    .io_pause       (io_pause),
     .io_cpu_rd      (io_ctrl_ymz_rd),
     .io_cpu_wr      (io_ctrl_ymz_wr),
     .io_cpu_addr    (io_ctrl_ymz_addr[0]),
