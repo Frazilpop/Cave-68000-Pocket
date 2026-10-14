@@ -26,6 +26,11 @@
                         "key": "pad_btn_y"
                     },
                     {
+                        "id": 9,
+                        "name": "Rapid shot (B1)",
+                        "key": "pad_trig_r"
+                    },
+                    {
                         "id": 6,
                         "name": "Start",
                         "key": "pad_btn_start"
@@ -59,6 +64,11 @@
                         "id": 3,
                         "name": "Button 4",
                         "key": "pad_btn_y"
+                    },
+                    {
+                        "id": 9,
+                        "name": "Rapid shot (B1)",
+                        "key": "pad_trig_r"
                     },
                     {
                         "id": 6,
