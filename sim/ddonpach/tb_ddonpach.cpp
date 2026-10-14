@@ -4,7 +4,7 @@
 //   tb_ddonpach <set.rom> <game id> <frames> <outdir> [dump frames, comma list]
 //          [--rom-lat N] [--spr-lat N] [--fb-lat N] [--all-frames]
 //          [--trace file] [--trace-count N] [--trace-data-only]
-//          [--prog file --replay N] [--wav file] [--ymz-log file]
+//          [--prog file --replay N] [--wav file] [--ymz-log file] [--ymz-trace file]
 //          [--press list]
 //
 // Hosts cave68000 (through sim/ddonpach/cave68000_sim.sv, which adds the
@@ -54,9 +54,14 @@
 // writes what the 68000 told the YMZ280B in tools/mame_cave_ymz.lua's
 // format, with each access's time put in the middle of the sample it lands
 // on – the next one begun (a write made while one is being worked on waits
-// for it; '+' marks those) – so sim/ymz280b's model can play the board's
-// own run back (model_vs_mame --true-rate). stats.csv gains the most clk_cpu clocks a sample
-// took that frame (of 362.8) and the samples that came late.
+// for it, as does one on the very clock a sample begins; '+' marks those) –
+// so sim/ymz280b's model can play the board's own run back (model_vs_mame
+// --true-rate). stats.csv gains the most clk_cpu clocks a sample took that
+// frame (of 362.8) and the samples that came late. --ymz-trace writes one
+// line per access, clocks in clk_cpu from reset: "<clock> <sample it lands
+// on> <clocks since the last sample begun> W <reg> <data> | S, then '+' (it
+// waits), 'b' (on the clock a sample begins) and, for a write, "applied
+// <clock>" – the clock the chip took it into its registers.
 //
 // --press holds inputs down over frame ranges, as tools/mame_cave_screens.lua's
 // PRESS does and by the same MAME field names: "400-405:Coin 1,600-605:1
@@ -94,6 +99,7 @@ typedef Vcave68000_sim Top;
 #include <cstdint>
 #include <string>
 #include <vector>
+#include <deque>
 #include <set>
 #include <algorithm>
 #include <sys/stat.h>
@@ -118,6 +124,7 @@ int main(int argc, char** argv) {
     int replay = -1;
     const char* wav_path = nullptr;
     const char* ymz_log_path = nullptr;
+    const char* ymz_trace_path = nullptr;
     struct Press { int from, to, port, bit; };     // port 0 p1, 1 p2, 2 coin, 3 start, 4 service, 5 pause
     std::vector<Press> presses;
     auto parse_presses = [&](const char* list) -> bool {
@@ -162,6 +169,7 @@ int main(int argc, char** argv) {
         else if (!strcmp(argv[i], "--replay") && i + 1 < argc)      replay = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--wav") && i + 1 < argc)         wav_path = argv[++i];
         else if (!strcmp(argv[i], "--ymz-log") && i + 1 < argc)     ymz_log_path = argv[++i];
+        else if (!strcmp(argv[i], "--ymz-trace") && i + 1 < argc)   ymz_trace_path = argv[++i];
         else if (!strcmp(argv[i], "--press") && i + 1 < argc) {
             if (!parse_presses(argv[++i])) return 2;
         }
@@ -330,6 +338,9 @@ int main(int argc, char** argv) {
     bool snd_busy_prev = false, ymz_wr_prev = false, ymz_rd_prev = false;
     bool ymz_read_pending = false; long ymz_read_at = 0; bool ymz_read_mid = false;
     uint8_t ymz_reg = 0;
+    FILE* ymz_trace = ymz_trace_path ? fopen(ymz_trace_path, "w") : nullptr;
+    std::deque<std::string> ymz_queued;      // the writes in the chip's queue, as traced
+    uint64_t clk_cpu_n = 0;
 
     // ------------------------------------------------------------- monitors
     FILE* trace = trace_path ? fopen(trace_path, "w") : nullptr;
@@ -500,9 +511,11 @@ int main(int argc, char** argv) {
             swap_prev = sw;
 
             // the sound: a sample out and the next begun at each snd_sample
+            clk_cpu_n++;
             if (ymz_read_pending) {      // the status a read latched, the clock after
-                fprintf(ymz_log, "%.12f S %02x%s\n", (ymz_read_at + 0.5) / snd_rate, t->dbg_ymz_dout,
-                        ymz_read_mid ? " +" : "");
+                if (ymz_log)
+                    fprintf(ymz_log, "%.12f S %02x%s\n", (ymz_read_at + 0.5) / snd_rate, t->dbg_ymz_dout,
+                            ymz_read_mid ? " +" : "");
                 ymz_read_pending = false;
             }
             if (t->snd_sample) {
@@ -514,15 +527,37 @@ int main(int argc, char** argv) {
             bool sb = t->dbg_ymz_busy;
             if (snd_busy_prev && !sb) snd_max_f = std::max<uint64_t>(snd_max_f, (cyc - snd_begin) / 3);
             snd_busy_prev = sb;
-            if (ymz_log) {
-                bool mid = sb;
+            if (ymz_log || ymz_trace) {
+                // an access on the clock a sample begins comes after it
+                bool on_begin = t->dbg_ymz_begin;
+                bool mid = sb || on_begin;
+                long lands = snd_started + on_begin;
+                uint64_t since = (cyc - snd_begin) / 3;
+                if (ymz_trace && t->dbg_ymz_apply && !ymz_queued.empty()) {
+                    fprintf(ymz_trace, "%s applied %llu\n", ymz_queued.front().c_str(),
+                            (unsigned long long)clk_cpu_n);
+                    ymz_queued.pop_front();
+                }
                 if (t->dbg_ymz_wr && !ymz_wr_prev) {
                     if (!t->dbg_ymz_a0) ymz_reg = t->dbg_ymz_din;
-                    else fprintf(ymz_log, "%.12f W %02x %02x%s\n", (snd_started + 0.5) / snd_rate, ymz_reg,
-                                 t->dbg_ymz_din, mid ? " +" : "");
+                    else {
+                        if (ymz_log)
+                            fprintf(ymz_log, "%.12f W %02x %02x%s\n", (lands + 0.5) / snd_rate, ymz_reg,
+                                    t->dbg_ymz_din, mid ? " +" : "");
+                        if (ymz_trace) {
+                            char b[96];
+                            snprintf(b, sizeof b, "%llu %ld %llu W %02x %02x%s%s", (unsigned long long)clk_cpu_n,
+                                     lands, (unsigned long long)since, ymz_reg, t->dbg_ymz_din,
+                                     mid ? " +" : "", on_begin ? " b" : "");
+                            ymz_queued.push_back(b);
+                        }
+                    }
                 }
                 if (t->dbg_ymz_rd && !ymz_rd_prev && t->dbg_ymz_a0) {
-                    ymz_read_pending = true; ymz_read_at = snd_started; ymz_read_mid = mid;
+                    ymz_read_pending = true; ymz_read_at = lands; ymz_read_mid = mid;
+                    if (ymz_trace)
+                        fprintf(ymz_trace, "%llu %ld %llu S%s%s\n", (unsigned long long)clk_cpu_n, lands,
+                                (unsigned long long)since, mid ? " +" : "", on_begin ? " b" : "");
                 }
             }
             ymz_wr_prev = t->dbg_ymz_wr;
@@ -633,6 +668,7 @@ int main(int argc, char** argv) {
     if (trace) fclose(trace);
     fclose(stats);
     if (ymz_log) fclose(ymz_log);
+    if (ymz_trace) fclose(ymz_trace);
     if (wav_path) {
         FILE* f = fopen(wav_path, "wb");
         if (!f) { perror(wav_path); return 1; }

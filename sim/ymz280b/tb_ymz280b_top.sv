@@ -19,7 +19,8 @@ module tb_ymz280b_top (
   output wire [15:0] audio,
   output wire        audio_valid,
   output wire        overrun,
-  output wire        busy
+  output wire        busy,
+  output wire        will_begin     // the next edge begins a sample
 );
   wire [15:0] dout;
   wire [24:0] addr;
@@ -50,6 +51,9 @@ module tb_ymz280b_top (
   assign cpu_dout = dout[7:0];
   assign rom_addr = addr[23:0];
   assign busy = sound.ymz280b.channelCtrl.state != 4'd0;
+  assign will_begin = sound.ymz280b.channelCtrl.state == 4'd0 &&
+                      (sound.ymz280b.channelCtrl.tickPending || sound.ymz280b.channelCtrl.tick) &&
+                      sound.ymz280b.queueCount == 4'd0;
 endmodule
 
 `default_nettype wire

@@ -60,7 +60,7 @@ module cave68000_psim #(
   output wire [2:0]  dbg_ipl,
   output wire        dbg_sprite_swap,
   output wire [1:0]  dbg_fb_read_page,
-  output wire        dbg_ymz_rd, dbg_ymz_wr, dbg_ymz_a0, dbg_ymz_busy,
+  output wire        dbg_ymz_rd, dbg_ymz_wr, dbg_ymz_a0, dbg_ymz_busy, dbg_ymz_begin, dbg_ymz_apply,
   output wire [7:0]  dbg_ymz_din, dbg_ymz_dout,
   output wire [6:0]  dbg_rom_req          // the seven read ports, for their wait counts
 );
@@ -181,6 +181,13 @@ module cave68000_psim #(
   assign dbg_ymz_din  = mem.board._main_io_soundCtrl_ymz_din[7:0];
   assign dbg_ymz_dout = mem.board._main_io_soundCtrl_ymz_dout[7:0];
   assign dbg_ymz_busy = mem.board.sound.ymz280b.channelCtrl.state != 4'd0;
+  // the next clk_cpu edge begins a sample (an access on it lands after the sample)
+  assign dbg_ymz_begin = mem.board.sound.ymz280b.channelCtrl.state == 4'd0 &&
+                         (mem.board.sound.ymz280b.channelCtrl.tickPending ||
+                          mem.board.sound.ymz280b.channelCtrl.tick) &&
+                         mem.board.sound.ymz280b.queueCount == 4'd0;
+  // the next edge applies the write at the head of the chip's queue
+  assign dbg_ymz_apply = mem.board.sound.ymz280b.apply;
   assign dbg_rom_req  = rom_req;
 endmodule
 
