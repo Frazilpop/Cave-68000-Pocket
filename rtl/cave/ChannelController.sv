@@ -59,6 +59,7 @@ module ChannelController #(
   input         io_access,         // a register write or status read: MAME's update
   output        io_update,         // MAME's 20 ms update
   input         io_hold,           // writes waiting: begin no sample
+  input         io_pause,          // the board paused: the chip's time stands still
   output        io_busy,           // the voices being played
   output [2:0]  io_index,          // the voice whose registers are read
   input  [8:0]  io_fnum,
@@ -93,13 +94,13 @@ module ChannelController #(
   wire [31:0] rateInc = io_clock16m ? RATE16_INC : 32'd2646;
   wire [31:0] rateDen = io_clock16m ? RATE16_DEN : RATE_DEN;
   wire [31:0] rateSum = rateAcc + rateInc;
-  wire        tick = rateSum >= rateDen;
+  wire        tick = !io_pause && rateSum >= rateDen;
   reg         tickPending;
 
   // ------------------------------------------------- MAME's stream updates
   localparam integer UPDATE_CLOCKS = CLOCK_HZ / 50;
   reg  [31:0] updateCount;
-  wire        update20 = updateCount == UPDATE_CLOCKS - 1;
+  wire        update20 = !io_pause && updateCount == UPDATE_CLOCKS - 1;
   reg         boundary;            // an update since the last sample begun
   reg         updateStart;         // this sample begins an update
 
@@ -244,8 +245,13 @@ module ChannelController #(
     end else begin
       audioValidReg <= 1'b0;
       overrunReg <= 1'b0;
-      rateAcc <= tick ? rateSum - rateDen : rateSum;
-      updateCount <= update20 ? 32'd0 : updateCount + 32'd1;
+      // paused (the Pocket's menu, with the 68000 halted), no sample is
+      // begun and the 20 ms updates wait: the one under way is finished, the
+      // output holds it, and the music takes up where it was
+      if (!io_pause) begin
+        rateAcc <= tick ? rateSum - rateDen : rateSum;
+        updateCount <= update20 ? 32'd0 : updateCount + 32'd1;
+      end
       if (io_access || update20)
         boundary <= 1'b1;
       if (tick) begin

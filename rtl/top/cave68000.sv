@@ -524,6 +524,7 @@ module cave68000 (
     .clock                 (clk_cpu),
     .reset                 (cpuDomainReset),
     .io_clock16m           (gameIndex == 4'd6),
+    .io_pause              (pause),
     .io_ctrl_ymz_rd        (_main_io_soundCtrl_ymz_rd),
     .io_ctrl_ymz_wr        (_main_io_soundCtrl_ymz_wr),
     .io_ctrl_ymz_addr      (_main_io_soundCtrl_ymz_addr),
