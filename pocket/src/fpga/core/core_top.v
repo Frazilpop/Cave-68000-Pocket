@@ -872,7 +872,7 @@ pocket_nvram u_nvram (
 wire        ce_pix, hs, vs, hblank, vblank_b, de;
 wire [7:0]  r, g, b;
 wire [15:0] snd;
-wire        snd_sample, snd_overrun, spr_swap;
+wire        snd_sample, snd_overrun, spr_swap, cpu_as;
 wire        diag_clr;
 wire [15:0] fb_rows_written, fb_rows_read, fb_rd_wait_max;
 wire        board_loaded = rom_loaded & (&ps_ready);
@@ -912,6 +912,7 @@ cave68000_mem #(.AW(SDR_AW)) u_board (
     .snd        (snd),      .snd_sample (snd_sample), .snd_overrun (snd_overrun),
 
     .spr_swap   (spr_swap),
+    .cpu_as     (cpu_as),
     .diag_clr   (diag_clr),
     .fb_rows_written (fb_rows_written),
     .fb_rows_read    (fb_rows_read),
@@ -939,9 +940,12 @@ cave68000_mem #(.AW(SDR_AW)) u_board (
 //   15 a sound sample came late (the YMZ280B's snd_overrun; should stay red)
 //
 // Counters (hex):
-//   0 the PSRAMs' measured latencies: chip 1 write, read, chip 0 write, read,
-//     one digit each (the datasheet says 4); a read digit of 8 or more is
-//     latency + 8, read at the later capture phase (pocket_psram_rows)
+//   0 high half: frames the 68000 stood still under the Pocket's menu (the
+//     menu open and no bus cycle all frame), since the core started;
+//     low half: the PSRAMs' measured latencies: chip 1 write, read, chip 0
+//     write, read, one digit each (the datasheet says 4); a read digit of 8
+//     or more is latency + 8, read at the later capture phase
+//     (pocket_psram_rows)
 //   1 high half: the longest a layer tile line waited for the SDRAM, request
 //     to acknowledge, clocks of 96 MHz (the layers allow ~76 in all);
 //     low half: the longest wait of a program line, the same
@@ -950,8 +954,12 @@ cave68000_mem #(.AW(SDR_AW)) u_board (
 //   3 high half: frame buffer rows written in the last frame; low: rows read
 //   4 the longest sprite draw, a page swap to the last row written after it,
 //     clocks of 96 MHz (a frame is 1,671,168)
-//   5 sprite tile lines read from the SDRAM in the last frame
-//   6 words 1,0 of line 0 as SDRAM reads them back    7 words 3,2
+//   5 high half: times the Pocket's menu was opened (APF's OS notify, host
+//     command 0x00B0), since the core started; low half: sprite tile lines
+//     read from the SDRAM in the last frame
+//   6 the 68000's waits in the last frame: clk_cpu clocks its bus cycles
+//     held AS beyond a cycle with no wait states (a frame is 557,056)
+//   7 the most of those in one frame (a peak)
 //
 // Peaks and flag 15 hold until the overlay is turned OFF in the menu
 // (diag_clr), so the routine is: overlay on to see the baseline, off to
@@ -1046,18 +1054,53 @@ always @(posedge clk) begin
     end
 end
 
+// The 68000's waits, on clk_cpu. A bus cycle with no wait states holds AS
+// for CPU_AS_ZW clocks of clk_cpu; every clock more is one the 68000 spent
+// waiting on its memories (the program behind the SDRAM's cache, above all),
+// time the board's own ROMs never cost it, and in a busy scene time the game
+// may not have to spare. The menu's count and the frames the 68000 stood
+// still under it show whether the pause took.
+localparam [5:0] CPU_AS_ZW = 6'd5;
+
+wire        vb_cpu, diag_clr_cpu;
+synch_3 s_vb_cpu   (.i(vblank_b), .o(vb_cpu), .clk(clk_cpu), .rise(), .fall());
+synch_3 s_diag_cpu (.i(diag_opt), .o(), .clk(clk_cpu), .rise(), .fall(diag_clr_cpu));
+reg         vb_cpu_q = 1'b0, inmenu_q = 1'b0, as_seen = 1'b0;
+reg  [5:0]  as_len   = 6'd0;
+reg  [31:0] cw_n = 32'd0, cw_f = 32'd0, cw_max = 32'd0;
+reg  [15:0] menu_opens = 16'd0, menu_frames = 16'd0;
+wire        cw_tick = cpu_as && (as_len >= CPU_AS_ZW);
+
+always @(posedge clk_cpu) begin
+    vb_cpu_q <= vb_cpu;
+    inmenu_q <= inmenu_cpu;
+    as_len   <= !cpu_as ? 6'd0 : (as_len == 6'h3f) ? as_len : as_len + 6'd1;
+    if (inmenu_cpu && !inmenu_q) menu_opens <= menu_opens + 16'd1;
+    if (vb_cpu && !vb_cpu_q) begin
+        cw_f    <= cw_n;
+        cw_n    <= {31'd0, cw_tick};
+        if (cw_n > cw_max) cw_max <= cw_n;
+        if (inmenu_cpu && !as_seen && menu_frames != 16'hFFFF) menu_frames <= menu_frames + 16'd1;
+        as_seen <= cpu_as;
+    end else begin
+        if (cw_tick) cw_n <= cw_n + 32'd1;
+        if (cpu_as)  as_seen <= 1'b1;
+    end
+    if (rst_cpu || diag_clr_cpu) cw_max <= 32'd0;
+end
+
 wire [63:0] exp_line = {exp_w3, exp_w2, exp_w1, exp_w0};
 wire [15:0] diag_flags = {f_late, ps_ready[1] & ~ps_fail[1], ps_ready[0] & ~ps_fail[0],
                           game, frame[5], diag_opt,
                           (rb_line == exp_line), board_rst, ldr_overflow, rom_loaded,
                           allcomplete_s, reset_n_96, mem_ready_96, both_96};
-wire [255:0] diag_cnt = {rb_line[63:32], rb_line[31:0],
-                         16'd0, lines_f,
+wire [255:0] diag_cnt = {cw_max, cw_f,
+                         menu_opens, lines_f,
                          draw_max,
                          rows_w_f, rows_r_f,
                          w_spr, fb_rd_wait_max,
                          w_layer, w_prog,
-                         16'd0, 1'b0, ps1_wl, ps1_rp, ps1_rl, 1'b0, ps0_wl, ps0_rp, ps0_rl};
+                         menu_frames, 1'b0, ps1_wl, ps1_rp, ps1_rl, 1'b0, ps0_wl, ps0_rp, ps0_rl};
 
 // Into the video clock for the overlay: values that change a few times a
 // frame and are only read off the screen, so a word is let through whole

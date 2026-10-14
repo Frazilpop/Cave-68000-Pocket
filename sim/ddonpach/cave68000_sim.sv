@@ -205,7 +205,7 @@ module cave68000_sim (
     .ee_dout (ee_dout), .ee_wait_n (ee_wait_n), .ee_valid (ee_valid),
     .ce_pix (ce_pix), .hs (hs), .vs (vs), .hblank (hblank), .vblank (vblank), .de (de),
     .r (r), .g (g), .b (b), .snd (snd), .snd_sample (snd_sample), .snd_overrun (snd_overrun),
-    .spr_swap ()
+    .spr_swap (), .cpu_as ()
   );
 
   assign dbg_as    = dut.main._cpu_io_as;

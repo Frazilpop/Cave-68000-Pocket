@@ -158,6 +158,7 @@ module Main(
   output         io_ss_reconstruction_ready,
   output         io_ss_blocked_access,
   output [31:0]  io_service_debug,
+  output         io_cpu_as,
   cave_ssbus_if.slave io_ssbus,
   output [63:0] io_debug_pipeline,
   output [63:0] io_debug_cpu,
@@ -5187,6 +5188,8 @@ module Main(
   assign io_soundCtrl_req = pwrinst2SoundWrite;
   assign io_soundCtrl_data = _cpu_io_dout;
   assign io_soundCtrl_reply_rd = pwrinst2SoundReplyPop;
+  // the 68000's address strobe, for the Pocket shell's count of its waits
+  assign io_cpu_as = _cpu_io_as;
   assign io_progRom_rd =
     gameIsPwrInst2 ? pwrinst2ProgRomRead
       : gameIsMazinger ? mazingerProgRomRead
