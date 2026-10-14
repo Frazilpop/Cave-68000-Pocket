@@ -392,11 +392,19 @@ wire [31:0] nv_bridge_rd;
 //                      6 gaia, theroes(a)
 //   0xF1000000         write 1: Test Mode, an action: one press of the
 //                      board's test button (a 1 ms pulse; upstream stretches
-//                      its edge into a press). In the game it opens the test
+//                      its edge into a press of 2.5 s, which the games take
+//                      as a tap: MAME's picture is the same for a 3-frame
+//                      and a 144-frame press). In the game it opens the test
 //                      menu; in the menu it leaves it, and that is when the
 //                      EEPROM games write the settings changed there (seen in
 //                      MAME on dfeveron: a change is only on screen until
 //                      then). Resetting the game instead would lose them.
+//                      The action is selected with the Pocket's menu open,
+//                      and under the menu the 68000 is halted while the
+//                      stretcher runs on, so a press made then was over
+//                      before the game ran again (build 7: nothing
+//                      happened). The press waits for the menu to close
+//                      (and for no reset to be running) before it is made.
 //                      Every DIP is held at MAME's default: the EEPROM games
 //                      keep their settings in the EEPROM (the test menu sets
 //                      them), and gaia's and theroes's DSW word is 0xfffb.
@@ -404,7 +412,9 @@ wire [31:0] nv_bridge_rd;
 //   0xF1000014 [0]     diagnostic overlay (pocket_diag), see DIAGNOSTICS
 
 reg  [2:0]  game_74  = 3'd0;
-reg  [16:0] test_cnt = 17'd0;               //   1 ms, as the reset
+wire        osnotify_inmenu;                //   APF's menu open (core_bridge_cmd, clk_74a)
+reg         test_pend = 1'b0;               //   a press waiting for the menu to close
+reg  [16:0] test_cnt  = 17'd0;              //   1 ms, as the reset
 wire        test_74  = (test_cnt != 17'd0);
 reg         diag_74  = 1'b0;
 reg  [16:0] hrst_cnt = 17'd0;               //   1 ms at 74.25 MHz = 74,250
@@ -413,6 +423,10 @@ wire        hrst_74  = (hrst_cnt != 17'd0);
 always @(posedge clk_74a) begin
     if (hrst_cnt != 17'd0) hrst_cnt <= hrst_cnt - 17'd1;
     if (test_cnt != 17'd0) test_cnt <= test_cnt - 17'd1;
+    if (test_pend && !osnotify_inmenu && !hrst_74) begin
+        test_pend <= 1'b0;
+        test_cnt  <= 17'd74250;
+    end
     if (bridge_wr) begin
         case (bridge_addr)
         32'hF0000000: begin
@@ -420,7 +434,7 @@ always @(posedge clk_74a) begin
             // a new game is taken with the board in reset (the .sdc relies on it)
             if (bridge_wr_data[2:0] != game_74) hrst_cnt <= 17'd74250;
         end
-        32'hF1000000: if (bridge_wr_data[0]) test_cnt <= 17'd74250;
+        32'hF1000000: if (bridge_wr_data[0]) test_pend <= 1'b1;
         32'hF100000C: hrst_cnt <= 17'd74250;
         32'hF1000014: diag_74  <= bridge_wr_data[0];
         default: ;
@@ -487,7 +501,6 @@ wire            savestate_load_busy   = 1'b0;
 wire            savestate_load_ok     = 1'b0;
 wire            savestate_load_err    = 1'b0;
 
-wire            osnotify_inmenu;
 
 wire            target_dataslot_read      = 1'b0;
 wire            target_dataslot_write     = 1'b0;
@@ -849,6 +862,7 @@ wire        nv_we, nv_dirty, nv_dirty_clr;
 pocket_nvram u_nvram (
     .clk_74a             (clk_74a),
     .bridge_wr           (bridge_wr),
+    .bridge_rd           (bridge_rd),
     .bridge_endian_little(bridge_endian_little),
     .bridge_addr         (bridge_addr),
     .bridge_wr_data      (bridge_wr_data),

@@ -52,10 +52,11 @@
 module pocket_nvram (
     input  wire        clk_74a,
     input  wire        bridge_wr,
+    input  wire        bridge_rd,
     input  wire        bridge_endian_little,
     input  wire [31:0] bridge_addr,
     input  wire [31:0] bridge_wr_data,
-    output wire [31:0] bridge_rd_word,  // for bridge_addr[6:2], two clk_74a cycles later
+    output wire [31:0] bridge_rd_word,  // the word of the last read strobe's address, held
 
     input  wire        clk,             // 96 MHz
     output wire [5:0]  nv_addr,
@@ -123,17 +124,31 @@ module pocket_nvram (
     // ------------------------------------------------------------ shadow
     wire [15:0] b_even, b_odd;
 
+    // APF's bridge reads are buffered by one word (io_bridge_peripheral's
+    // header): a read returns the bus value as it stands, then strobes
+    // bridge_rd to start the read of its own address, whose word APF takes
+    // from the next read. APF's command handler (core_bridge_cmd) works the
+    // same way, latching on the strobe. So the address is taken on the
+    // strobe and its word held until the next one. Following bridge_addr
+    // instead (as this did) answered each read with the word after the one
+    // APF wanted: every shutdown wrote the file out rotated by one 32-bit
+    // word, the first four bytes at the end (seen on the card, 14 Oct: one
+    // word for ddonpach after one launch, three for dfeveron after three).
+    reg [4:0] rd_a = 5'd0;
+    always @(posedge clk_74a)
+        if (bridge_rd && bridge_addr[31:28] == 4'h2) rd_a <= bridge_addr[6:2];
+
     bram_block_dp #(.DATA(16), .ADDR(5)) u_even (
         .a_clk(clk),     .a_wr(sh_wr && !scan_i[0]), .a_addr(scan_i[5:1]),
         .a_din(nv_dout), .a_dout(sh_q_even),
-        .b_clk(clk_74a), .b_wr(1'b0), .b_addr(bridge_addr[6:2]),
+        .b_clk(clk_74a), .b_wr(1'b0), .b_addr(rd_a),
         .b_din(16'd0),   .b_dout(b_even)
     );
 
     bram_block_dp #(.DATA(16), .ADDR(5)) u_odd (
         .a_clk(clk),     .a_wr(sh_wr &&  scan_i[0]), .a_addr(scan_i[5:1]),
         .a_din(nv_dout), .a_dout(sh_q_odd),
-        .b_clk(clk_74a), .b_wr(1'b0), .b_addr(bridge_addr[6:2]),
+        .b_clk(clk_74a), .b_wr(1'b0), .b_addr(rd_a),
         .b_din(16'd0),   .b_dout(b_odd)
     );
 
