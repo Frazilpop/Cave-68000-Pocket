@@ -975,8 +975,10 @@ cave68000_mem #(.AW(SDR_AW)) u_board (
 //   2 high half: the longest a sprite tile line waited; low half: the
 //     longest a frame buffer line read waited for its first row
 //   3 high half: frame buffer rows written in the last frame; low: rows read
-//   4 the longest sprite draw, a page swap to the last row written after it,
-//     clocks of 96 MHz (a frame is 1,671,168)
+//   4 the sound: first digit the bitstream (0 the main one, 1 DonPachi's),
+//     the next three the sample lines read from the SDRAM in the last frame
+//     (port 1, held at FFF), low half the loudest sample out of the board
+//     (|snd|) since the overlay was turned off
 //   5 high half: times the Pocket's menu was opened (APF's OS notify, host
 //     command 0x00B0), since the core started; low half: sprite tile lines
 //     read from the SDRAM in the last frame
@@ -1006,11 +1008,9 @@ reg  [63:0] rb_line = 64'd0;
 reg         rb_req  = 1'b0;
 reg  [2:0]  vb_s    = 3'd0;                 // vblank, into clk
 reg  [7:0]  frame   = 8'd0;
-reg  [2:0]  swap_s  = 3'd0;                 // the page swap (clk_cpu, aligned)
-reg  [31:0] since_swap = 32'd0, draw_t = 32'd0, draw_max = 32'd0;
-reg  [15:0] rw_q    = 16'd0;
 reg  [15:0] rows_w_at = 16'd0, rows_r_at = 16'd0, rows_w_f = 16'd0, rows_r_f = 16'd0;
 reg  [15:0] lines_f = 16'd0, lines_n = 16'd0;
+reg  [11:0] snd_lines_f = 12'd0, snd_lines_n = 12'd0;
 reg         late_q  = 1'b0;
 wire        rb_ack  = rom_ack[NP];
 wire        vb_rise = vb_s[1] & ~vb_s[2];
@@ -1021,7 +1021,6 @@ integer p;
 always @(posedge clk) begin
     diag_opt_q <= diag_opt;
     vb_s   <= {vb_s[1:0], vblank_b};
-    swap_s <= {swap_s[1:0], spr_swap};
     late_q <= snd_overrun;
     req_q  <= rom_req;
 
@@ -1032,7 +1031,7 @@ always @(posedge clk) begin
 
     if (board_rst || diag_clr) begin
         w_layer <= 16'd0; w_prog <= 16'd0; w_spr <= 16'd0;
-        f_late <= 1'b0; draw_max <= 32'd0;
+        f_late <= 1'b0;
     end else begin
         for (p = 2; p <= 4; p = p + 1)
             if (rom_req[p] && w_cnt[p] > w_layer) w_layer <= w_cnt[p];
@@ -1040,15 +1039,11 @@ always @(posedge clk) begin
         for (p = 5; p <= 6; p = p + 1)
             if (rom_req[p] && w_cnt[p] > w_spr) w_spr <= w_cnt[p];
         if (late_q) f_late <= 1'b1;
-        if (draw_t > draw_max) draw_max <= draw_t;
     end
 
-    // the sprite draw: the time from a swap to the last row written after it
-    if (swap_s[1] && !swap_s[2])        since_swap <= 32'd0;
-    else if (since_swap != 32'hFFFF_FFFF) since_swap <= since_swap + 32'd1;
-    rw_q <= fb_rows_written;
-    if (fb_rows_written != rw_q) draw_t <= since_swap;
+    // tile lines read, sprites' and samples', counted by frame
     lines_n <= lines_n + {15'd0, rom_req[5] & ~req_q[5]} + {15'd0, rom_req[6] & ~req_q[6]};
+    if (rom_req[1] && !req_q[1] && snd_lines_n != 12'hFFF) snd_lines_n <= snd_lines_n + 12'd1;
 
     if (dl_wr && dl_addr[SDR_AW:3] == {(SDR_AW-2){1'b0}}) begin
         case (dl_addr[2:1])
@@ -1066,6 +1061,8 @@ always @(posedge clk) begin
         rows_r_at <= fb_rows_read;
         lines_f   <= lines_n;
         lines_n   <= {15'd0, rom_req[5] & ~req_q[5]} + {15'd0, rom_req[6] & ~req_q[6]};
+        snd_lines_f <= snd_lines_n;
+        snd_lines_n <= {11'd0, rom_req[1] & ~req_q[1]};
     end
     if (rb_req) begin
         if (rb_ack) begin
@@ -1112,6 +1109,19 @@ always @(posedge clk_cpu) begin
     if (rst_cpu || diag_clr_cpu) cw_max <= 32'd0;
 end
 
+// The loudest sample out of the board since the overlay was turned off.
+wire [15:0] snd_abs = snd[15] ? (~snd + 16'd1) : snd;
+reg  [15:0] snd_peak = 16'd0;
+always @(posedge clk_cpu)
+    if (rst_cpu || diag_clr_cpu)           snd_peak <= 16'd0;
+    else if (snd_sample && snd_abs > snd_peak) snd_peak <= snd_abs;
+
+`ifdef CAVE_OKI
+localparam [3:0] DIAG_BITSTREAM = 4'd1;
+`else
+localparam [3:0] DIAG_BITSTREAM = 4'd0;
+`endif
+
 // Rapid shot's phase (inputs, above): flipped at the end of vblank, clear
 // of the reads made as vblank begins (ddonpach's, in its interrupt).
 always @(posedge clk_cpu) begin
@@ -1127,7 +1137,7 @@ wire [15:0] diag_flags = {f_late, ps_ready[1] & ~ps_fail[1], ps_ready[0] & ~ps_f
                           allcomplete_s, reset_n_96, mem_ready_96, both_96};
 wire [255:0] diag_cnt = {cw_max, cw_f,
                          menu_opens, lines_f,
-                         draw_max,
+                         DIAG_BITSTREAM, snd_lines_f, snd_peak,
                          rows_w_f, rows_r_f,
                          w_spr, fb_rd_wait_max,
                          w_layer, w_prog,
