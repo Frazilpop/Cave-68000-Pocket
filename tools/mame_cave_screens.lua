@@ -23,15 +23,18 @@ for a, b, name in string.gmatch(os.getenv("PRESS") or "", "(%d+)-(%d+):([^,]+)")
     field = field or port.fields[name]
   end
   if not field then error("no input called " .. name) end
-  table.insert(presses, { from = tonumber(a), to = tonumber(b), field = field })
+  table.insert(presses, { from = tonumber(a), to = tonumber(b), name = name, field = field })
 end
 os.execute('mkdir -p "' .. DIR .. '"')
 local n = 0
 cave_screens_notifier = emu.add_machine_frame_notifier(function()
   n = n + 1
+  -- an input listed more than once is down while any of its ranges holds
+  local down = {}
   for _, p in ipairs(presses) do
-    p.field:set_value((n >= p.from and n <= p.to) and 1 or 0)
+    down[p.name] = down[p.name] or (n >= p.from and n <= p.to)
   end
+  for _, p in ipairs(presses) do p.field:set_value(down[p.name] and 1 or 0) end
   if n >= FROM and n <= TO and ((n - FROM) % STEP) == 0 then
     scr:snapshot(string.format("%s/m%05d.png", DIR, n))
   end
