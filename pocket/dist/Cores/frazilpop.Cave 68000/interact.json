@@ -5,14 +5,10 @@
             {
                 "name": "Test Mode",
                 "id": 15,
-                "type": "check",
+                "type": "action",
                 "enabled": true,
-                "persist": false,
                 "address": "0xF1000000",
-                "defaultval": 0,
-                "value": "0x1",
-                "value_off": "0x0",
-                "mask": "0xFFFFFFFE"
+                "value": 1
             },
             {
                 "name": "Reset Game",
