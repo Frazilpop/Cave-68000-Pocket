@@ -5,6 +5,8 @@
 # $OBJ/tb_ymz280b    the board's chip against MAME's, from a log
 # $OBJ/model_vs_mame MAME's chip, ported, against MAME's own WAV
 set -euo pipefail
+# a Quartus compile already running is waited for (tools/wait_quartus.sh)
+tools/wait_quartus.sh
 OBJ=${OBJ:-build/obj_ymz}
 mkdir -p "$OBJ" build/tmp
 export TMPDIR="$PWD/build/tmp"

@@ -67,6 +67,8 @@ if ! mkdir "$lock" 2>/dev/null; then
 fi
 echo $$ > "$lock/pid"
 trap 'rm -rf "$lock"' EXIT INT TERM
+# Compiles the lock does not see (a seed sweep, another checkout) are waited for.
+"$repo/tools/wait_quartus.sh"
 
 # ---------------------------------------------------- generated -> build/
 mkdir -p "$qb/db" "$qb/incremental_db" "$qb/output_files"

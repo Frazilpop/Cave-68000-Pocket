@@ -11,6 +11,8 @@
 # microrom.mem and nanorom.mem in the working directory (the bootstrap links
 # them at the root), so run either from the root too.
 set -euo pipefail
+# a Quartus compile already running is waited for (tools/wait_quartus.sh)
+tools/wait_quartus.sh
 pocket=0
 if [ "${1:-}" = "--pocket" ]; then pocket=1; shift; fi
 mkdir -p build/tmp
