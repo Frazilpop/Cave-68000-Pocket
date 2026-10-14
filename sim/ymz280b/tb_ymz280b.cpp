@@ -4,6 +4,7 @@
 // chip (tools/mame_cave_ymz.lua), sample for sample.
 //
 //   tb_ymz280b <ymz.bin> <log.txt> <outdir> [--16m] [--rom-lat N] [--seconds S]
+//              [--on-begin i,j,..] [--against board.wav]
 //
 // Each access in the log lands on sample floor(t * rate) (rate = the chip's
 // clock / 192 as MAME keeps it: 88200 Hz, or 83333 with --16m for gaia and
@@ -19,6 +20,12 @@
 // comparison: samples equal, the runs that are not (the first few listed),
 // status reads that answered differently from MAME, the most clocks a sample
 // took against the clocks between samples, and any late sample.
+//
+// --on-begin holds the data strobe of the listed writes (indices into the
+// log's accesses, from 0) to the clock on which the chip begins the next
+// sample, as a 68000's write can fall on the whole board. --against compares
+// the board's output with another WAV (the whole board's own, say) instead
+// of MAME's chip.
 
 #include "Vtb_ymz280b_top.h"
 #include "Vtb_ymz280b_top___024root.h"
@@ -28,6 +35,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <set>
 #include <string>
 #include <vector>
 #include <sys/stat.h>
@@ -38,8 +46,17 @@ int main(int argc, char** argv) {
     bool clock16m = false;
     int rom_lat = 12;
     double seconds = 0;
+    std::set<size_t> on_begin;
+    const char* against = nullptr;
     for (int i = 4; i < argc; i++) {
         if (!strcmp(argv[i], "--16m")) clock16m = true;
+        else if (!strcmp(argv[i], "--on-begin") && i + 1 < argc) {
+            for (char* p = argv[++i]; *p; ) {
+                on_begin.insert(strtoul(p, &p, 10));
+                if (*p == ',') p++;
+            }
+        }
+        else if (!strcmp(argv[i], "--against") && i + 1 < argc) against = argv[++i];
         else if (!strcmp(argv[i], "--rom-lat") && i + 1 < argc) rom_lat = atoi(argv[++i]);
         else if (!strcmp(argv[i], "--seconds") && i + 1 < argc) seconds = atof(argv[++i]);
     }
@@ -83,8 +100,9 @@ int main(int argc, char** argv) {
         t->cpu_rd = 0; t->cpu_wr = 0;
         if (op == 0 && e < ev.size() && sample_at(ev[e].t, rate, 0) <= started)
             op = ev[e].status ? 3 : 1;
+        bool held = op == 2 && on_begin.count(e) && !t->will_begin;
         if (op == 1) { t->cpu_wr = 1; t->cpu_addr = 0; t->cpu_din = ev[e].reg; }
-        else if (op == 2) { t->cpu_wr = 1; t->cpu_addr = 1; t->cpu_din = ev[e].data; }
+        else if (op == 2 && !held) { t->cpu_wr = 1; t->cpu_addr = 1; t->cpu_din = ev[e].data; }
         else if (op == 3) { t->cpu_rd = 1; t->cpu_addr = 1; }
         // ---- the ROM's requests taken at this edge
         bool take = t->rom_rd && t->rom_wait_n;
@@ -101,7 +119,8 @@ int main(int argc, char** argv) {
                 status_diff++;
             }
         }
-        if (op == 2 || op == 4) { op = 0; e++; }
+        if (held) {}
+        else if (op == 2 || op == 4) { op = 0; e++; }
         else if (op == 1 || op == 3) op++;
         t->rom_valid = 0;
         if (rom_busy) {
@@ -126,6 +145,12 @@ int main(int argc, char** argv) {
     write_wav16((outdir + "/board.wav").c_str(), board, (int)lround(rate));
 
     // ------------------------------------------------------------ compare
+    if (against) {
+        std::vector<int16_t> other = read_wav16(against);
+        total = std::min<long>(total, other.size());
+        model.assign(other.begin(), other.begin() + total);
+        printf("against %s\n", against);
+    }
     long exact = 0, runs = 0, maxd = 0, maxat = 0, listed = 0, run_start = -1;
     for (long i = 0; i <= total; i++) {
         bool same = i == total || board[i] == model[i];

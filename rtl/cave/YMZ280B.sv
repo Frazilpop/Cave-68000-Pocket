@@ -10,11 +10,12 @@
 // when MAME does: its timer runs out just after the access that brought the
 // stream up to date, or at the sound manager's 20 ms update, and a key on or
 // off of the voice before then (or the enable cleared) cancels it. A write
-// that comes while the voices are being played waits for them, in a queue:
-// sample n is begun at (n + 1) / rate, so MAME, which brings the stream up
-// to floor(t * rate) first, has such a write land on sample n + 1, like one
-// made between samples; the ends are told after the queue is through. The
-// save-state ports are gone (the Pocket has no save states).
+// that comes while the voices are being played (or on the clock they are
+// begun) waits for them, in a queue: sample n is begun at (n + 1) / rate,
+// so MAME, which brings the stream up to floor(t * rate) first, has such a
+// write land on sample n + 1, like one made between samples; the ends are
+// told after the queue is through. The save-state ports are gone (the
+// Pocket has no save states).
 
 // Yamaha YMZ280B: the 68000's side, the voice registers and the status.
 module YMZ280B #(

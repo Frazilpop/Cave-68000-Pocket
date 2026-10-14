@@ -17,8 +17,8 @@
 // every 20 ms of machine time from the sound manager. Three things happen
 // only at an update's start or end, so the board keeps the same points (an
 // access marks the next sample begun – a write made while the voices are
-// being played waits for them, YMZ280B.sv – and the 20 ms count from reset
-// the next sample after it):
+// being played, or on the clock a sample begins, waits for them, YMZ280B.sv
+// – and the 20 ms count from reset the next sample after it):
 //
 //   * a voice found not playing with its last two samples zero at an
 //     update's start is silent until the next, its interpolation point back
@@ -269,10 +269,11 @@ module ChannelController #(
             audioValidReg <= 1'b1;
             acc <= 29'sd0;
             index <= 3'd0;
-            // an access now still comes before the sample; the 20 ms
-            // update falls at its start, so after it
-            updateStart <= boundary || io_access;
-            boundary <= update20;
+            // an access now comes after the sample, as its write does (it
+            // waits in YMZ280B's queue); the 20 ms update falls at its
+            // start, so after it too
+            updateStart <= boundary;
+            boundary <= update20 || io_access;
             state <= S_LATCH;
           end
 

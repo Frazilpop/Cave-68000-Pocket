@@ -133,7 +133,7 @@ module cave68000_sim (
   output wire [2:0]  dbg_ipl,
   output wire        dbg_sprite_swap,
   output wire [1:0]  dbg_fb_read_page,  // the sprite frame buffer page on screen
-  output wire        dbg_ymz_rd, dbg_ymz_wr, dbg_ymz_a0, dbg_ymz_busy,
+  output wire        dbg_ymz_rd, dbg_ymz_wr, dbg_ymz_a0, dbg_ymz_busy, dbg_ymz_begin, dbg_ymz_apply,
   output wire [7:0]  dbg_ymz_din, dbg_ymz_dout
 );
   wire [31:0] off_snd, off_l0, off_l1, off_l2, off_spr;
@@ -226,6 +226,13 @@ module cave68000_sim (
   assign dbg_ymz_din  = dut._main_io_soundCtrl_ymz_din[7:0];
   assign dbg_ymz_dout = dut._main_io_soundCtrl_ymz_dout[7:0];
   assign dbg_ymz_busy = dut.sound.ymz280b.channelCtrl.state != 4'd0;
+  // the next clk_cpu edge begins a sample (an access on it lands after the sample)
+  assign dbg_ymz_begin = dut.sound.ymz280b.channelCtrl.state == 4'd0 &&
+                         (dut.sound.ymz280b.channelCtrl.tickPending ||
+                          dut.sound.ymz280b.channelCtrl.tick) &&
+                         dut.sound.ymz280b.queueCount == 4'd0;
+  // the next edge applies the write at the head of the chip's queue
+  assign dbg_ymz_apply = dut.sound.ymz280b.apply;
 endmodule
 
 `default_nettype wire
