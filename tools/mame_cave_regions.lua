@@ -7,7 +7,8 @@
 --        -skip_gameinfo -autoboot_delay 0 -video none -sound none -nothrottle
 --
 -- (verify_rom.py runs this for you.) Writes <region>.bin for maincpu,
--- sprites0, layer0, layer1, layer2, ymz and eeprom – the ones the set has –
+-- sprites0, layer0, layer1, layer2, ymz (DonPachi: oki1 and oki2) and eeprom
+-- – the ones the set has –
 -- each at MAME's region size, plus regions.txt listing size / endianness /
 -- width.
 --
@@ -22,7 +23,7 @@
 
 local DIR  = os.getenv("DUMP_DIR") or "."
 local mach = manager.machine
-local NAMES = { "maincpu", "sprites0", "layer0", "layer1", "layer2", "ymz", "eeprom" }
+local NAMES = { "maincpu", "sprites0", "layer0", "layer1", "layer2", "ymz", "oki1", "oki2", "eeprom" }
 
 local function dump(name)
   local r = mach.memory.regions[":" .. name]

@@ -12,15 +12,25 @@ THE CONTRACT is the layout each game's image follows (LAYOUT_ORDER and the
 offsets OFFSETS asserts): the regions packed one after another in the order
 the MiSTer core's MRAs concatenate them – program, EEPROM, samples, layer 0,
 layer 1, layer 2, sprites – so every region starts where upstream's
-CaveGameConfig expects it and the board's tables are untouched. One file per
+CaveGameConfig expects it and the board's tables are untouched. DonPachi is
+the exception: its second OKI's samples are MAME's whole 3 MB region and the
+NMK112's fold of it (below), where upstream's MRA has 1 MB, so its layers and
+sprites start later and CaveGameConfig's entry for it says where. One file per
 set, no gaps, the size the regions add up to. The Pocket loads the file at
 bridge address 0 and the shell writes byte n to SDRAM byte n.
 
 Byte order within a region is the MRA's, which is how the board reads it:
   program   MAME's region order – even byte = the 68000 word's high byte
-            (ROM_LOAD16_BYTE: the first file on even bytes, the second on odd)
+            (ROM_LOAD16_BYTE: the first file on even bytes, the second on odd;
+            DonPachi's one file is ROM_LOAD16_WORD_SWAP, its bytes swapped in
+            pairs)
   EEPROM    the zip's 128-byte file as it is (MAME: ROM_LOAD16_WORD)
   samples, layers   the files as they are, one after another
+  DonPachi's samples   oki0 the first OKI's 2 MB; oki1 the second's 3 MB as
+            MAME has them, then its last 1 MB again: the NMK112 picks one of
+            64 pages of 64 KB, and MAME maps pages 48-63 of a 48-page region
+            onto 32-47 (map_non_power_of_two), so the image holds all 64 and
+            the board reads page * 64 KB straight through
   sprites   the files as they are – ddonpach's are NOT word-swapped the way
             MAME's ROM_LOAD16_WORD_SWAP leaves its region; esprade's and
             guwange's pairs are byte-interleaved (file A on even bytes, file
@@ -59,7 +69,7 @@ import zlib
 # --------------------------------------------------------------------- layout
 # The regions in the image's order. A set without one (gaia and theroes have
 # no EEPROM; uopoko has one layer, feversos two) simply skips it.
-LAYOUT_ORDER = ["prog", "eeprom", "ymz", "layer0", "layer1", "layer2", "sprites"]
+LAYOUT_ORDER = ["prog", "eeprom", "ymz", "oki0", "oki1", "layer0", "layer1", "layer2", "sprites"]
 
 # Where upstream's CaveGameConfig expects each region, by game id: checked
 # against the packing when an image is built, so a wrong size cannot pass.
@@ -70,14 +80,18 @@ OFFSETS = {
     0: {"ymz": 0x0100080, "layer0": 0x0500080, "layer1": 0x0700080, "sprites": 0x0900080},                       # feversos
     4: {"ymz": 0x0100080, "layer0": 0x0300080, "sprites": 0x0700080},                                            # uopoko
     6: {"ymz": 0x0100000, "layer0": 0x0d00000, "layer1": 0x1100000, "layer2": 0x1500000, "sprites": 0x1900000},  # gaia
+    2: {"eeprom": 0x0080000, "oki0": 0x0080080, "oki1": 0x0280080,                                               # donpachi
+        "layer0": 0x0680080, "layer1": 0x0780080, "layer2": 0x0880080, "sprites": 0x08c0080},
 }
 
 # ------------------------------------------------------------------ ROM_START
-# Transcribed from cave.cpp's ROM_START blocks for the fourteen sets (CRCs
+# Transcribed from cave.cpp's ROM_START blocks for the nineteen sets (CRCs
 # and sizes), laid out as the MRAs concatenate them:
 #
 #   ("L", name, crc, offset, length)          the file as it is
 #   ("B", name, crc, offset, length)          ROM_LOAD16_BYTE: file byte k -> offset + 2k
+#   ("W", name, crc, offset, length)          ROM_LOAD16_WORD_SWAP: the file's bytes swapped in pairs
+#   ("P", name, crc, offset, length, src, n)  n bytes of the file from src, as they are
 #   ("I", (nameA, crcA), (nameB, crcB), offset, length_each)
 #                                             byte-interleaved pair: A[k] -> offset + 2k, B[k] -> offset + 2k + 1
 #
@@ -87,6 +101,8 @@ OFFSETS = {
 def L(n, c, o, s): return ("L", n, c, o, s)
 def B(n, c, o, s): return ("B", n, c, o, s)
 def I(a, b, o, s): return ("I", a, b, o, s)
+def W(n, c, o, s): return ("W", n, c, o, s)
+def P(n, c, o, s, src, k): return ("P", n, c, o, s, src, k)
 
 
 def _prog(even, odd):
@@ -185,6 +201,29 @@ def _gaia(prog, snd3, bg, obj):
     }
 
 
+# DonPachi: two OKI M6295s behind the NMK112 instead of the YMZ280B, two 4bpp
+# layers and an 8x8 4bpp text layer, 4bpp sprites without zoom; one
+# word-swapped program ROM. The sets differ in the program and the text ROM
+# (and in what MAME calls the same EEPROM file).
+def _donpachi(prog, text, eeprom="eeprom-donpachi.bin"):
+    return {
+        "prog": (0x080000, [W(prog[0], prog[1], 0, 0x080000)]),
+        "eeprom": _eeprom(eeprom, 0x315fb546),
+        "oki0": (0x200000, [L("atdp.u33", 0xd749de00, 0, 0x200000)]),
+        "oki1": (0x400000, [L("atdp.u32", 0x0d89fcca, 0x000000, 0x100000),
+                            L("atdp.u33", 0xd749de00, 0x100000, 0x200000),
+                            P("atdp.u33", 0xd749de00, 0x300000, 0x200000, 0x100000, 0x100000)]),
+        "layer0": (0x100000, [L("atdp.u54", 0x6bda6b66, 0, 0x100000)]),
+        "layer1": (0x100000, [L("atdp.u57", 0x0a0e72b9, 0, 0x100000)]),
+        "layer2": (0x040000, [L(text[0], text[1], 0, 0x040000)]),
+        "sprites": (0x400000, [L("atdp.u44", 0x7189e953, 0x000000, 0x200000),
+                               L("atdp.u45", 0x6984173f, 0x200000, 0x200000)]),
+        # not in the image (LAYOUT_ORDER has no "pal"): MAME will not start
+        # the set without it, so verify_rom.py stages it with the rest
+        "pal": (0x155, [L("peel18cv8p-15.u18", 0x3f4787e9, 0, 0x155)]),
+    }
+
+
 def _set(parent, game, regions):
     return {"parent": parent, "game": game, "regions": regions}
 
@@ -217,6 +256,12 @@ SETS = {
     "gaia":      _set(None, 6, _gaia((("prg1.127", 0x47b904b2), ("prg2.128", 0x469b7794)), GAIA_SND, GAIA_BG, GAIA_OBJ)),
     "theroes":   _set(None, 6, _gaia((("t-hero-epm1.u0127", 0x09db7195), ("t-hero-epm0.u0129", 0x2d4e3310)), THEROES_SND, THEROES_BG, THEROES_OBJ)),
     "theroesa":  _set("theroes", 6, _gaia((("u0127", 0xa2c599a7), ("u0129", 0xf205a715)), THEROES_SND, THEROES_BG, THEROES_OBJ)),
+    # DonPachi (US) – MAME's parent – Japan, Japan Satsuei version, Korea, Hong Kong
+    "donpachi":   _set(None, 2, _donpachi(("prgu.u29", 0x89c36802), ("text.u58", 0x5dba06e7), "eeprom-donpachi.u10")),
+    "donpachij":  _set("donpachi", 2, _donpachi(("prg.u29", 0x6be14af6), ("u58.bin", 0x285379ff))),
+    "donpachijs": _set("donpachi", 2, _donpachi(("prg.u29", 0x810dbd42), ("u58.bin", 0x285379ff), "eeprom-donpachi.u10")),
+    "donpachikr": _set("donpachi", 2, _donpachi(("prgk.u26", 0xbbaf4c8b), ("text.u58", 0x5dba06e7))),
+    "donpachihk": _set("donpachi", 2, _donpachi(("37.u29", 0x71f39f30), ("u58.bin", 0x285379ff))),
 }
 
 
@@ -320,13 +365,23 @@ def build_regions(setname, index, log=print):
                 log(f"    {rname:<8} {off:#09x} I {na:<20} {ca:08x} <- {wa}")
                 log(f"    {rname:<8} {off + 1:#09x} I {nb:<20} {cb:08x} <- {wb}")
                 continue
+            if kind == "P":
+                _, name, crc, off, length, src, n = op
+                data, where = index.read(length, crc, prefer, name)
+                if off + n > size:
+                    raise SystemExit(f"{setname}:{rname}: {name} overruns the region")
+                buf[off:off + n] = data[src:src + n]
+                log(f"    {rname:<8} {off:#09x} P {name:<20} {crc:08x} [{src:#x}+{n:#x}] <- {where}")
+                continue
             _, name, crc, off, length = op
             data, where = index.read(length, crc, prefer, name)
-            if kind == "L":
+            if kind == "L" or kind == "W":
                 end = off + length
                 if end > size:
                     raise SystemExit(f"{setname}:{rname}: {name} overruns the region")
                 buf[off:end] = data
+                if kind == "W":
+                    buf[off:end:2], buf[off + 1:end:2] = data[1::2], data[0::2]
             elif kind == "B":
                 end = off + 2 * length - 1
                 if end > size:

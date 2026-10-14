@@ -4,6 +4,10 @@
 #   pocket/build.sh            compile pocket/src/fpga/ap_core.qpf
 #   pocket/build.sh --clean    empty db/ and incremental_db/ first, so smart
 #                              recompilation cannot skip a stage
+#   pocket/build.sh --oki      DonPachi's bitstream: the board with its two
+#                              OKI M6295s in place of the YMZ280B (CAVE_OKI),
+#                              as the revision ap_core_oki – ap_core.qsf with
+#                              the macro added, written here each time
 #
 # Runs Quartus Prime Lite 21.1 in Docker (raetro/quartus:21.1, linux/amd64),
 # here under Colima with Rosetta. The WHOLE repository is mounted, because the
@@ -16,7 +20,8 @@
 # own pre-flow script, which rewrites apf/build_id.mif with the build date.
 #
 # Afterwards: the bit-reversed bitstream the Pocket loads is written to
-# pocket/dist/Cores/frazilpop.Cave 68000/bitstream.rbf_r, and the fit and the
+# pocket/dist/Cores/frazilpop.Cave 68000/bitstream.rbf_r (with --oki,
+# donpachi.rbf_r, which DonPachi's instance JSONs select), and the fit and the
 # worst slack per clock are printed. The script fails if any clock has
 # negative slack. Takes the same lock as pocket/fit/fit.sh: one Quartus at a
 # time in this repository.
@@ -30,10 +35,11 @@ qb=$repo/build/pocket/quartus
 dist="$repo/pocket/dist/Cores/frazilpop.Cave 68000"
 image=raetro/quartus:21.1
 
-clean=0
+clean=0 rev=ap_core out_name=bitstream.rbf_r
 for arg in "$@"; do
     case "$arg" in
         --clean) clean=1 ;;
+        --oki) rev=ap_core_oki out_name=donpachi.rbf_r ;;
         -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
         *) echo "build.sh: unknown argument '$arg'" >&2; exit 2 ;;
     esac
@@ -89,18 +95,31 @@ for m in microrom.mem nanorom.mem; do
     [ -e "$fpga/$m" ] || ln -s "../../../third_party/fx68k/hdl/$m" "$fpga/$m"
 done
 
+if [ "$rev" = ap_core_oki ]; then
+    # Quartus adds the revision to ap_core.qpf, first, which would make it the
+    # project's default; the file is put back as it was afterwards
+    cp "$fpga/ap_core.qpf" "$qb/ap_core.qpf.keep"
+    trap 'cp "$qb/ap_core.qpf.keep" "$fpga/ap_core.qpf"; rm -rf "$lock"' EXIT INT TERM
+    { cat "$fpga/ap_core.qsf"
+      echo
+      echo "# DonPachi's bitstream (pocket/build.sh --oki writes this file from ap_core.qsf)"
+      echo 'set_global_assignment -name VERILOG_MACRO "CAVE_OKI=1"'
+    } > "$fpga/ap_core_oki.qsf"
+fi
+
 if [ "$clean" = 1 ]; then
     echo "== clean: emptying $qb/db and $qb/incremental_db"
     find "$qb/db" "$qb/incremental_db" -mindepth 1 -delete
 fi
 
 log=$qb/compile.log
-echo "== Quartus 21.1 ($image)"
+[ "$rev" = ap_core ] || log=$qb/compile_$rev.log
+echo "== Quartus 21.1 ($image), revision $rev"
 echo "   log: $log"
 start=$(date +%s)
 if ! docker run --rm --platform linux/amd64 \
         -v "$repo":/build -w /build/pocket/src/fpga \
-        "$image" quartus_sh --flow compile ap_core > "$log" 2>&1; then
+        "$image" quartus_sh --flow compile ap_core -c "$rev" > "$log" 2>&1; then
     echo "== COMPILE FAILED"
     grep -E "^Error|^ *Error \(" "$log" | head -40
     exit 1
@@ -116,10 +135,10 @@ if [ "$crit" != "0" ]; then
 fi
 
 # ------------------------------------------------------------- bitstream
-rbf=$qb/output_files/ap_core.rbf
+rbf=$qb/output_files/$rev.rbf
 [ -f "$rbf" ] || { echo "build.sh: no $rbf" >&2; exit 1; }
 mkdir -p "$dist"
-rbf_r=$dist/bitstream.rbf_r
+rbf_r=$dist/$out_name
 python3 -I - "$rbf" "$rbf_r" <<'EOF'
 import sys
 # APF wants every byte of the .rbf bit-reversed (Analogue: Packaging a Core).
@@ -131,11 +150,11 @@ print(f"== bitstream: {dst} ({len(data)} bytes)")
 EOF
 
 # ------------------------------------------------------------- reports
-python3 -I - "$qb/output_files" <<'EOF'
+python3 -I - "$qb/output_files" "$rev" <<'EOF'
 import os, re, sys
-out = sys.argv[1]
+out, rev = sys.argv[1], sys.argv[2]
 
-fit = open(os.path.join(out, "ap_core.fit.summary")).read()
+fit = open(os.path.join(out, rev + ".fit.summary")).read()
 print("== fit (5CEBA4F23C8)")
 for key in ("Logic utilization (in ALMs)", "Total registers", "Total pins",
             "Total block memory bits", "Total RAM Blocks", "Total DSP Blocks",
@@ -144,7 +163,7 @@ for key in ("Logic utilization (in ALMs)", "Total registers", "Total pins",
     if m:
         print(f"   {key:<28} {m.group(1).strip()}")
 
-sta = open(os.path.join(out, "ap_core.sta.summary")).read()
+sta = open(os.path.join(out, rev + ".sta.summary")).read()
 worst = {}
 for typ, slack in re.findall(r"Type\s*:\s*(.+?)\nSlack\s*:\s*(-?[\d.]+)", sta):
     m = re.match(r"(.+?) Model (Setup|Hold|Recovery|Removal|Minimum Pulse Width) '(.+)'", typ)

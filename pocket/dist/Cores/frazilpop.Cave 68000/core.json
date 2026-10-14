@@ -6,7 +6,7 @@
                 "cave68000"
             ],
             "shortname": "Cave 68000",
-            "description": "Cave's 68000 shoot-'em-ups – DoDonPachi, ESP Ra.De., Guwange and the rest of the board's games – on the Analogue Pocket.",
+            "description": "Cave's 68000 shoot-'em-ups – DonPachi, DoDonPachi, ESP Ra.De., Guwange and the rest of the board's games – on the Analogue Pocket.",
             "author": "frazilpop",
             "url": "https://github.com/Frazilpop/Cave-68000-Pocket",
             "version": "0.0.0",
@@ -30,6 +30,11 @@
                 "name": "default",
                 "id": 0,
                 "filename": "bitstream.rbf_r"
+            },
+            {
+                "name": "donpachi",
+                "id": 1,
+                "filename": "donpachi.rbf_r"
             }
         ]
     }

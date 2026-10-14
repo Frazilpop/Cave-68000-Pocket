@@ -11,7 +11,9 @@
 //     combinationally on a write as MiSTer's bridge gave it;
 //   * the 68000's bus, taken by hierarchical reference for the trace, the
 //     sprite frame buffer's page on screen, for --replay, and the YMZ280B's
-//     68000 side and whether it is working on a sample, for --ymz-log.
+//     68000 side and whether it is working on a sample, for --ymz-log (built
+//     with CAVE_OKI, sim/ddonpach/build.sh --oki: the OKIs' and the NMK112's
+//     writes, the samples begun and each chip's samples, for --oki-log).
 //
 // The memories themselves are the C++ side's (tb_ddonpach.cpp).
 
@@ -134,7 +136,12 @@ module cave68000_sim (
   output wire        dbg_sprite_swap,
   output wire [1:0]  dbg_fb_read_page,  // the sprite frame buffer page on screen
   output wire        dbg_ymz_rd, dbg_ymz_wr, dbg_ymz_a0, dbg_ymz_busy, dbg_ymz_begin, dbg_ymz_apply,
-  output wire [7:0]  dbg_ymz_din, dbg_ymz_dout
+  output wire [7:0]  dbg_ymz_din, dbg_ymz_dout,
+  output wire        dbg_oki_wr0, dbg_oki_wr1, dbg_nmk_wr, dbg_oki_tick,
+  output wire [7:0]  dbg_oki_din,
+  output wire [2:0]  dbg_nmk_addr,
+  output wire        dbg_oki_sv0, dbg_oki_sv1,
+  output wire [19:0] dbg_oki_s0, dbg_oki_s1
 );
   wire [31:0] off_snd, off_l0, off_l1, off_l2, off_spr;
   CaveGameConfig cfg (
@@ -225,6 +232,25 @@ module cave68000_sim (
   assign dbg_ymz_a0   = dut._main_io_soundCtrl_ymz_addr[0];
   assign dbg_ymz_din  = dut._main_io_soundCtrl_ymz_din[7:0];
   assign dbg_ymz_dout = dut._main_io_soundCtrl_ymz_dout[7:0];
+`ifdef CAVE_OKI
+  assign dbg_ymz_busy = 1'b0;
+  assign dbg_ymz_begin = 1'b0;
+  assign dbg_ymz_apply = 1'b0;
+  assign dbg_oki_wr0  = dut._main_io_soundCtrl_oki_0_wr;
+  assign dbg_oki_wr1  = dut._main_io_soundCtrl_oki_1_wr;
+  assign dbg_nmk_wr   = dut._main_io_soundCtrl_nmk_wr;
+  assign dbg_oki_din  = dut._main_io_soundCtrl_nmk_wr ? dut._main_io_soundCtrl_nmk_din[7:0] :
+                        dut._main_io_soundCtrl_oki_1_wr ? dut._main_io_soundCtrl_oki_1_din[7:0] :
+                        dut._main_io_soundCtrl_oki_0_din[7:0];
+  assign dbg_nmk_addr = dut._main_io_soundCtrl_nmk_addr[2:0];
+  // the next clk_cpu edge begins one of OKI 1's samples (an access on it
+  // lands after the sample)
+  assign dbg_oki_tick = dut.sound.tick1;
+  assign dbg_oki_sv0  = dut.sound.io_sample_valid_0;
+  assign dbg_oki_sv1  = dut.sound.io_sample_valid_1;
+  assign dbg_oki_s0   = dut.sound.io_sample_0;
+  assign dbg_oki_s1   = dut.sound.io_sample_1;
+`else
   assign dbg_ymz_busy = dut.sound.ymz280b.channelCtrl.state != 4'd0;
   // the next clk_cpu edge begins a sample (an access on it lands after the sample)
   assign dbg_ymz_begin = dut.sound.ymz280b.channelCtrl.state == 4'd0 &&
@@ -233,6 +259,9 @@ module cave68000_sim (
                          dut.sound.ymz280b.queueCount == 4'd0;
   // the next edge applies the write at the head of the chip's queue
   assign dbg_ymz_apply = dut.sound.ymz280b.apply;
+  assign {dbg_oki_wr0, dbg_oki_wr1, dbg_nmk_wr, dbg_oki_tick, dbg_oki_din, dbg_nmk_addr} = '0;
+  assign {dbg_oki_sv0, dbg_oki_sv1, dbg_oki_s0, dbg_oki_s1} = '0;
+`endif
 endmodule
 
 `default_nettype wire

@@ -62,6 +62,11 @@ module cave68000_psim #(
   output wire [1:0]  dbg_fb_read_page,
   output wire        dbg_ymz_rd, dbg_ymz_wr, dbg_ymz_a0, dbg_ymz_busy, dbg_ymz_begin, dbg_ymz_apply,
   output wire [7:0]  dbg_ymz_din, dbg_ymz_dout,
+  output wire        dbg_oki_wr0, dbg_oki_wr1, dbg_nmk_wr, dbg_oki_tick,
+  output wire [7:0]  dbg_oki_din,
+  output wire [2:0]  dbg_nmk_addr,
+  output wire        dbg_oki_sv0, dbg_oki_sv1,
+  output wire [19:0] dbg_oki_s0, dbg_oki_s1,
   output wire [6:0]  dbg_rom_req          // the seven read ports, for their wait counts
 );
   localparam int unsigned AW = 25;
@@ -180,6 +185,23 @@ module cave68000_psim #(
   assign dbg_ymz_a0   = mem.board._main_io_soundCtrl_ymz_addr[0];
   assign dbg_ymz_din  = mem.board._main_io_soundCtrl_ymz_din[7:0];
   assign dbg_ymz_dout = mem.board._main_io_soundCtrl_ymz_dout[7:0];
+`ifdef CAVE_OKI
+  assign dbg_ymz_busy = 1'b0;
+  assign dbg_ymz_begin = 1'b0;
+  assign dbg_ymz_apply = 1'b0;
+  assign dbg_oki_wr0  = mem.board._main_io_soundCtrl_oki_0_wr;
+  assign dbg_oki_wr1  = mem.board._main_io_soundCtrl_oki_1_wr;
+  assign dbg_nmk_wr   = mem.board._main_io_soundCtrl_nmk_wr;
+  assign dbg_oki_din  = mem.board._main_io_soundCtrl_nmk_wr ? mem.board._main_io_soundCtrl_nmk_din[7:0] :
+                        mem.board._main_io_soundCtrl_oki_1_wr ? mem.board._main_io_soundCtrl_oki_1_din[7:0] :
+                        mem.board._main_io_soundCtrl_oki_0_din[7:0];
+  assign dbg_nmk_addr = mem.board._main_io_soundCtrl_nmk_addr[2:0];
+  assign dbg_oki_tick = mem.board.sound.tick1;
+  assign dbg_oki_sv0  = mem.board.sound.io_sample_valid_0;
+  assign dbg_oki_sv1  = mem.board.sound.io_sample_valid_1;
+  assign dbg_oki_s0   = mem.board.sound.io_sample_0;
+  assign dbg_oki_s1   = mem.board.sound.io_sample_1;
+`else
   assign dbg_ymz_busy = mem.board.sound.ymz280b.channelCtrl.state != 4'd0;
   // the next clk_cpu edge begins a sample (an access on it lands after the sample)
   assign dbg_ymz_begin = mem.board.sound.ymz280b.channelCtrl.state == 4'd0 &&
@@ -188,6 +210,9 @@ module cave68000_psim #(
                          mem.board.sound.ymz280b.queueCount == 4'd0;
   // the next edge applies the write at the head of the chip's queue
   assign dbg_ymz_apply = mem.board.sound.ymz280b.apply;
+  assign {dbg_oki_wr0, dbg_oki_wr1, dbg_nmk_wr, dbg_oki_tick, dbg_oki_din, dbg_nmk_addr} = '0;
+  assign {dbg_oki_sv0, dbg_oki_sv1, dbg_oki_s0, dbg_oki_s1} = '0;
+`endif
   assign dbg_rom_req  = rom_req;
 endmodule
 

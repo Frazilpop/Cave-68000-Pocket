@@ -18,7 +18,9 @@
 //   038 tilemaps x 3      CaveLayerProcessor, on clk_vid
 //   013 sprites           SpriteProcessor / Blitter / Decoder on clk, into
 //                         the frame buffer the platform keeps
-//   YMZ280B               Sound, on clk_cpu
+//   YMZ280B               Sound, on clk_cpu; built with CAVE_OKI defined,
+//                         DonPachi's two OKI M6295s and NMK112 instead
+//                         (SoundOki), the board then playing DonPachi alone
 //   93C46                 EEPROM, inside Main; its 64 x 16 store is a port
 //   palette, VRAMs, sprite RAM, work RAM   on chip, inside Main
 //
@@ -110,7 +112,7 @@ module cave68000 (
 
   // Audio, on clk_cpu: the YMZ280B's mono output, held between samples;
   // snd_sample marks each new one (the chip's clock / 192), snd_overrun one
-  // that came late
+  // that came late (the OKI build: the two OKIs mixed, strobed at 88,200 Hz)
   output wire [15:0] snd,
   output wire        snd_sample,
   output wire        snd_overrun,
@@ -124,8 +126,13 @@ module cave68000 (
   // ------------------------------------------------------------- the game
   // Upstream's index, held to the YMZ280B games: 7 is not a game, so the
   // Power Instinct 2 paths (indices 7 and 8) can never be selected and
-  // synthesis sweeps them.
+  // synthesis sweeps them. The OKI build plays DonPachi (2) alone, and
+  // sweeps the others.
+`ifdef CAVE_OKI
+  wire [3:0] gameIndex = 4'd2;
+`else
   wire [3:0] gameIndex = (game == 3'd7) ? 4'd1 : {1'b0, game};
+`endif
 
   wire [8:0]  gameConfig_granularity;
   wire [1:0]  gameConfig_sound_0_device;
@@ -199,6 +206,10 @@ module cave68000 (
   // ------------------------------------------------------------- the wires
   wire [15:0]  _main_io_soundCtrl_ymz_dout;
   wire         _main_io_soundCtrl_irq;
+  wire         _main_io_soundCtrl_oki_0_wr, _main_io_soundCtrl_oki_1_wr, _main_io_soundCtrl_nmk_wr;
+  wire [15:0]  _main_io_soundCtrl_oki_0_din, _main_io_soundCtrl_oki_1_din, _main_io_soundCtrl_nmk_din;
+  wire [15:0]  _main_io_soundCtrl_oki_0_dout, _main_io_soundCtrl_oki_1_dout;
+  wire [22:0]  _main_io_soundCtrl_nmk_addr;
   wire [15:0]  _main_io_progRom_dout;
   wire         _main_io_progRom_valid;
   wire [15:0]  _main_io_eeprom_dout;
@@ -390,15 +401,15 @@ module cave68000 (
     .io_gpuMem_sprite_vram_dout             (_main_io_gpuMem_sprite_vram_dout),
     .io_gpuMem_paletteRam_addr              (_main_io_gpuMem_paletteRam_addr),
     .io_gpuMem_paletteRam_dout              (_main_io_gpuMem_paletteRam_dout),
-    .io_soundCtrl_oki_0_wr                  (),
-    .io_soundCtrl_oki_0_din                 (),
-    .io_soundCtrl_oki_0_dout                (16'h0000),
-    .io_soundCtrl_oki_1_wr                  (),
-    .io_soundCtrl_oki_1_din                 (),
-    .io_soundCtrl_oki_1_dout                (16'h0000),
-    .io_soundCtrl_nmk_wr                    (),
-    .io_soundCtrl_nmk_addr                  (),
-    .io_soundCtrl_nmk_din                   (),
+    .io_soundCtrl_oki_0_wr                  (_main_io_soundCtrl_oki_0_wr),
+    .io_soundCtrl_oki_0_din                 (_main_io_soundCtrl_oki_0_din),
+    .io_soundCtrl_oki_0_dout                (_main_io_soundCtrl_oki_0_dout),
+    .io_soundCtrl_oki_1_wr                  (_main_io_soundCtrl_oki_1_wr),
+    .io_soundCtrl_oki_1_din                 (_main_io_soundCtrl_oki_1_din),
+    .io_soundCtrl_oki_1_dout                (_main_io_soundCtrl_oki_1_dout),
+    .io_soundCtrl_nmk_wr                    (_main_io_soundCtrl_nmk_wr),
+    .io_soundCtrl_nmk_addr                  (_main_io_soundCtrl_nmk_addr),
+    .io_soundCtrl_nmk_din                   (_main_io_soundCtrl_nmk_din),
     .io_soundCtrl_ymz_rd                    (_main_io_soundCtrl_ymz_rd),
     .io_soundCtrl_ymz_wr                    (_main_io_soundCtrl_ymz_wr),
     .io_soundCtrl_ymz_addr                  (_main_io_soundCtrl_ymz_addr),
@@ -520,6 +531,41 @@ module cave68000 (
   );
 
   // -------------------------------------------------------------- Sound
+`ifdef CAVE_OKI
+  wire [7:0] okiDout0, okiDout1;
+  SoundOki sound (
+    .clock                 (clk_cpu),
+    .reset                 (cpuDomainReset),
+    .io_pause              (pause),
+    .io_oki_0_wr           (_main_io_soundCtrl_oki_0_wr),
+    .io_oki_0_din          (_main_io_soundCtrl_oki_0_din[7:0]),
+    .io_oki_0_dout         (okiDout0),
+    .io_oki_1_wr           (_main_io_soundCtrl_oki_1_wr),
+    .io_oki_1_din          (_main_io_soundCtrl_oki_1_din[7:0]),
+    .io_oki_1_dout         (okiDout1),
+    .io_nmk_wr             (_main_io_soundCtrl_nmk_wr),
+    .io_nmk_addr           (_main_io_soundCtrl_nmk_addr[2:0]),
+    .io_nmk_din            (_main_io_soundCtrl_nmk_din[7:0]),
+    .io_rom_rd             (_sound_io_rom_0_rd),
+    .io_rom_addr           (_sound_io_rom_0_addr),
+    .io_rom_dout           (_sound_io_rom_0_dout),
+    .io_rom_wait_n         (_sound_io_rom_0_wait_n),
+    .io_rom_valid          (_sound_io_rom_0_valid),
+    .io_audio              (snd),
+    .io_audio_valid        (snd_sample),
+    .io_overrun            (snd_overrun),
+    .io_sample_valid_0     (),
+    .io_sample_valid_1     (),
+    .io_sample_0           (),
+    .io_sample_1           ()
+  );
+  assign _main_io_soundCtrl_oki_0_dout = {8'h00, okiDout0};
+  assign _main_io_soundCtrl_oki_1_dout = {8'h00, okiDout1};
+  assign _main_io_soundCtrl_ymz_dout = 16'h0000;
+  assign _main_io_soundCtrl_irq = 1'b0;
+`else
+  assign _main_io_soundCtrl_oki_0_dout = 16'h0000;
+  assign _main_io_soundCtrl_oki_1_dout = 16'h0000;
   Sound #(.CLOCK_HZ (32000000)) sound (
     .clock                 (clk_cpu),
     .reset                 (cpuDomainReset),
@@ -540,6 +586,7 @@ module cave68000 (
     .io_audio_valid        (snd_sample),
     .io_overrun            (snd_overrun)
   );
+`endif
 
   CaveSoundRomReadFreezer sound_io_rom_0_freezer (
     .clock          (clk),
