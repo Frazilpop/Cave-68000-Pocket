@@ -19,11 +19,12 @@
 // port whenever neither writes.
 //
 // Word order. The board's words are the region's bytes big-endian, word
-// n = [2n] << 8 | [2n + 1], as MAME stores a 93C46 and as upstream's cache
-// swapped them; the loader's words are the image's, little-endian, so the
-// seed swaps each. The nv port swaps too, so a save file is byte for byte
-// MAME's .nv for the same set (pocket_nvram puts word w at file bytes
-// {2w + 1, 2w}).
+// n = [2n] << 8 | [2n + 1], as MAME loads a 93C46 from its zip and as
+// upstream's cache swapped them; the loader's words are the image's,
+// little-endian, so the seed swaps each. The nv port swaps too, so a save
+// file is byte for byte the zip's EEPROM file for the same set (pocket_nvram
+// puts word w at file bytes {2w + 1, 2w}); MAME's own .nv has each pair of
+// bytes swapped.
 //
 // nv_dirty rises when the game writes a word.
 

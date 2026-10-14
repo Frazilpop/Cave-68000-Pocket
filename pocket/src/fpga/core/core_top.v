@@ -346,7 +346,7 @@ pocket_pll_video u_pll_video (
 //                 power-up and calibration run once), the save slot.
 //   board_rst     clk: rst_por, or APF holding the core in reset (from boot
 //                 to [0011 Reset Exit], and again from [0010 Reset Enter]), or
-//                 the Reset action, or Test Mode turned off. Taken into
+//                 the Reset action. Taken into
 //                 clk_cpu by a register (the two are aligned) and into
 //                 clk_vid by a synchroniser. The board adds !rom_loaded.
 
@@ -390,28 +390,29 @@ wire [31:0] nv_bridge_rd;
 //                      writes it: 0 feversos, dfeveron; 1 ddonpach(j);
 //                      3 esprade(j, jo); 4 uopoko(j); 5 guwange(s);
 //                      6 gaia, theroes(a)
-//   0xF1000000 [0]     Test Mode. The board's test button, as upstream's
-//                      service option: turning it on presses the button
-//                      (upstream stretches the edge into a press of 131 ms),
-//                      which takes the game into its test menu; turning it
-//                      off resets the game, which is how the menu is left.
+//   0xF1000000         write 1: Test Mode, an action: one press of the
+//                      board's test button (a 1 ms pulse; upstream stretches
+//                      its edge into a press). In the game it opens the test
+//                      menu; in the menu it leaves it, and that is when the
+//                      EEPROM games write the settings changed there (seen in
+//                      MAME on dfeveron: a change is only on screen until
+//                      then). Resetting the game instead would lose them.
 //                      Every DIP is held at MAME's default: the EEPROM games
 //                      keep their settings in the EEPROM (the test menu sets
 //                      them), and gaia's and theroes's DSW word is 0xfffb.
 //   0xF100000C         write: reset the game (1 ms)
 //   0xF1000014 [0]     diagnostic overlay (pocket_diag), see DIAGNOSTICS
 
-localparam [31:0] OPT_MENU = 32'h0000_0001;
-
 reg  [2:0]  game_74  = 3'd0;
-reg  [31:0] opt_74   = 32'd0;
+reg  [16:0] test_cnt = 17'd0;               //   1 ms, as the reset
+wire        test_74  = (test_cnt != 17'd0);
 reg         diag_74  = 1'b0;
 reg  [16:0] hrst_cnt = 17'd0;               //   1 ms at 74.25 MHz = 74,250
 wire        hrst_74  = (hrst_cnt != 17'd0);
-wire [31:0] opt_wr   = bridge_wr_data & OPT_MENU;
 
 always @(posedge clk_74a) begin
     if (hrst_cnt != 17'd0) hrst_cnt <= hrst_cnt - 17'd1;
+    if (test_cnt != 17'd0) test_cnt <= test_cnt - 17'd1;
     if (bridge_wr) begin
         case (bridge_addr)
         32'hF0000000: begin
@@ -419,10 +420,7 @@ always @(posedge clk_74a) begin
             // a new game is taken with the board in reset (the .sdc relies on it)
             if (bridge_wr_data[2:0] != game_74) hrst_cnt <= 17'd74250;
         end
-        32'hF1000000: begin
-            opt_74 <= opt_wr;
-            if (opt_74[0] && !opt_wr[0]) hrst_cnt <= 17'd74250;
-        end
+        32'hF1000000: if (bridge_wr_data[0]) test_cnt <= 17'd74250;
         32'hF100000C: hrst_cnt <= 17'd74250;
         32'hF1000014: diag_74  <= bridge_wr_data[0];
         default: ;
@@ -434,7 +432,6 @@ always @(posedge clk_74a) begin
     casez (bridge_addr)
     32'h2???????: bridge_rd_data <= nv_bridge_rd;
     32'hF0000000: bridge_rd_data <= {29'd0, game_74};
-    32'hF1000000: bridge_rd_data <= opt_74;
     32'hF1000014: bridge_rd_data <= {31'd0, diag_74};
     32'hF8??????: bridge_rd_data <= cmd_bridge_rd_data;
     default:      bridge_rd_data <= 32'd0;
@@ -612,7 +609,7 @@ wire        host_rst, diag_opt, test_opt;
 
 pocket_sync_bus #(.W(3), .INIT(3'd0)) s_cfg96 (
     .clk (clk),
-    .d   ({hrst_74, diag_74, opt_74[0]}),
+    .d   ({hrst_74, diag_74, test_74}),
     .q   ({host_rst, diag_opt, test_opt})
 );
 

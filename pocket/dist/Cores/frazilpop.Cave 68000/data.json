@@ -27,7 +27,7 @@
                 "name": "Save",
                 "id": 2,
                 "required": false,
-                "parameters": "0x24",
+                "parameters": "0x4",
                 "nonvolatile": true,
                 "extensions": [
                     "sav"

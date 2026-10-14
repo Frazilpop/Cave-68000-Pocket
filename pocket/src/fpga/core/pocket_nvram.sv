@@ -9,7 +9,8 @@
 //
 // FILE FORMAT. The nv port's word w is bytes {2w+1, 2w} of the file. The
 // board's store (cave_eeprom_store) swaps each word on that port, so the file
-// is the 93C46 big-endian per word: byte for byte a MAME .nv for the same set.
+// is the 93C46 big-endian per word: byte for byte the EEPROM file in MAME's
+// zip. (MAME's own .nv is the same words little-endian, each pair swapped.)
 //
 // IN: boot writes. Bridge writes in 0x2xxxxxxx come through a second
 // data_loader (agg23, MIT) — the same dcfifo crossing the ROM uses — as 16-bit
