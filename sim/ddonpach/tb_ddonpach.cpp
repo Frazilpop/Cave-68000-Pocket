@@ -76,6 +76,9 @@
 // printed at the end.
 
 #ifdef POCKET_MEM
+#ifndef DL_BITS
+#define DL_BITS 25      // the dl port's word address, [25:1]: the SDRAM's 64 MB
+#endif
 #include "Vcave68000_psim.h"
 #include "Vcave68000_psim___024root.h"
 typedef Vcave68000_psim Top;
@@ -185,6 +188,7 @@ int main(int argc, char** argv) {
         if (fread(rom.data(), 1, n, f) != (size_t)n) { perror("read"); return 1; }
         fclose(f);
     }
+    const size_t image_bytes = rom.size();
     rom.resize(64u << 20, 0);
     if (prog_path) {
         FILE* f = fopen(prog_path, "rb");
@@ -265,7 +269,12 @@ int main(int argc, char** argv) {
 
 #ifdef POCKET_MEM
     // power-on: the memories come up (the SDRAM's init, the PSRAMs' power-up
-    // and calibration), the EEPROM region streams past as the loader sends it
+    // and calibration), then the whole image streams past the board as
+    // pocket_rom_loader sends it: every word in order, one clock on and one
+    // off, at the word address the dl port carries (DL_BITS of it, as the
+    // loader drives the port). The SDRAM model already holds the image; the
+    // stream is for the EEPROM's seed, which must take the words at its
+    // region and no others.
     t->dl_wr = 0;
     {
         uint64_t n = 0;
@@ -278,13 +287,15 @@ int main(int argc, char** argv) {
                 (unsigned long long)n, t->psram_lats & 7, (t->psram_lats >> 3) & 1, (t->psram_lats >> 4) & 7,
                 (t->psram_lats >> 7) & 7, (t->psram_lats >> 10) & 1, (t->psram_lats >> 11) & 7,
                 t->psram_cal_fail ? " (CALIBRATION FAILED)" : "");
-        if (game != 6)
-            for (int i = 0; i < 64; i++) {
-                t->dl_wr = 1; t->dl_addr = (0x100000 >> 1) + i; t->dl_data = rom16(0x100000 + 2 * i);
-                half(0); half(1); cyc++;
-                t->dl_wr = 0;
-                half(0); half(1); cyc++;
-            }
+        const uint32_t words = (uint32_t)(image_bytes / 2);
+        for (uint32_t w = 0; w < words; w++) {
+            t->dl_wr = 1; t->dl_addr = w & ((1u << DL_BITS) - 1); t->dl_data = rom16(2 * w);
+            half(0); half(1); cyc++;
+            t->dl_wr = 0;
+            half(0); half(1); cyc++;
+            if ((w & 0xfffff) == 0xfffff || w + 1 == words)
+                fprintf(stderr, "loaded %u of %u words\n", w + 1, words);
+        }
     }
 #else
     t->prog_wait_n = 1; t->snd_wait_n = 1; t->tile_wait_n = 7;

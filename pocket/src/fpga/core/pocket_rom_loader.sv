@@ -64,7 +64,7 @@ module pocket_rom_loader #(
 
     // board snoop
     output reg               dl_wr,
-    output wire [24:1]       dl_addr,
+    output wire [SDR_AW:1]   dl_addr,
     output wire [15:0]       dl_data,
     output reg               rom_loaded,
 
@@ -120,7 +120,7 @@ module pocket_rom_loader #(
 
     // ----------------------------------------------------------- writer
     assign wr_be   = 2'b11;
-    assign dl_addr = wr_addr[24:1];
+    assign dl_addr = wr_addr;
     assign dl_data = wr_din;
 
     reg [$clog2(QUIET+1)-1:0] quiet;

@@ -678,7 +678,7 @@ wire [SDR_AW:1]   ldr_wr_addr;
 wire [15:0]       ldr_wr_din;
 wire [1:0]        ldr_wr_be;
 wire              dl_wr;
-wire [24:1]       dl_addr;
+wire [SDR_AW:1]   dl_addr;
 wire [15:0]       dl_data;
 wire              rom_loaded;
 wire              ldr_overflow;
@@ -1027,7 +1027,7 @@ always @(posedge clk) begin
     if (fb_rows_written != rw_q) draw_t <= since_swap;
     lines_n <= lines_n + {15'd0, rom_req[5] & ~req_q[5]} + {15'd0, rom_req[6] & ~req_q[6]};
 
-    if (dl_wr && dl_addr[24:3] == 22'd0) begin
+    if (dl_wr && dl_addr[SDR_AW:3] == {(SDR_AW-2){1'b0}}) begin
         case (dl_addr[2:1])
         2'd0: exp_w0 <= dl_data;
         2'd1: exp_w1 <= dl_data;

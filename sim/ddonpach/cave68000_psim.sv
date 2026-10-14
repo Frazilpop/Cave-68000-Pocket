@@ -35,7 +35,7 @@ module cave68000_psim #(
 
   // the loader's stream past the SDRAM (the EEPROM's seed)
   input  wire        dl_wr,
-  input  wire [24:1] dl_addr,
+  input  wire [25:1] dl_addr,     // [AW:1], the SDRAM word address
   input  wire [15:0] dl_data,
 
   output wire        sdram_ready,
