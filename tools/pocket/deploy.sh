@@ -7,7 +7,8 @@
 #
 # Copies pocket/dist ("Cores/frazilpop.Cave 68000" with the two bitstreams –
 # bitstream.rbf_r for the YMZ280B games, donpachi.rbf_r for DonPachi's sets – the
-# platform JSON and image, the instance JSONs under Assets/cave68000/) onto the
+# platform JSON and image, the instance JSONs under Assets/cave68000/ – one
+# for each game, the other versions in _alternatives/ beside them) onto the
 # Pocket's SD card, and each target set's build/pocket/<set>.rom (made by
 # tools/pocket/build_rom.py) to Assets/cave68000/common/. A ROM image already on
 # the card is left alone: build/pocket/deployed-roms.txt records, for each card
@@ -29,6 +30,11 @@
 # the commit of its sources), and a bitstream in dist with no record there is
 # refused. One put into dist by hand (a seed sweep's winner, an older build
 # put back) needs its line written by hand, from its timing report.
+#
+# The sets in ALTS are each game's other versions: their instance JSONs live in
+# _alternatives/. A card from before that still has them beside the games;
+# they are taken off it, and a save the Pocket kept for one of them is copied
+# into Saves/.../_alternatives/ (the old one left where it was).
 
 set -euo pipefail
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -43,6 +49,8 @@ BUILDS="$ROMS/bitstreams.txt"                   # written by pocket/build.sh
 ROMREC="$ROMS/deployed-roms.txt"
 SETS="ddonpach ddonpachj esprade espradej espradejo guwange guwanges feversos dfeveron uopoko uopokoj gaia theroes theroesa
       donpachi donpachij donpachijs donpachikr donpachihk"      # the target sets
+ALTS="ddonpachj espradej espradejo guwanges feversos uopokoj theroesa
+      donpachij donpachijs donpachikr donpachihk"               # in _alternatives/
 [ -f "$BIN" ] || { echo "no $BIN - run pocket/build.sh first"; exit 1; }
 [ -f "$BIN_OKI" ] || echo "Warning: no $BIN_OKI - DonPachi's sets will not start (pocket/build.sh --oki)"
 
@@ -91,7 +99,9 @@ fi
 # the ROM images to copy: every target set that has both an image and an instance JSON
 roms=()
 for s in $SETS; do
-	[ -f "$ROMS/$s.rom" ] && [ -f "$DIST/Assets/$PLATFORM/$CORE/$s.json" ] && roms+=("$s")
+	[ -f "$ROMS/$s.rom" ] || continue
+	[ -f "$DIST/Assets/$PLATFORM/$CORE/$s.json" ] || [ -f "$DIST/Assets/$PLATFORM/$CORE/_alternatives/$s.json" ] &&
+		roms+=("$s")
 done
 [ ${#roms[@]} -gt 0 ] || echo "Warning: no ROM images in $ROMS - the core goes on without games (tools/pocket/build_rom.py all ~/Downloads build/pocket)"
 
@@ -148,6 +158,18 @@ for d in Cores Platforms Assets; do
 done
 echo "Copied the core ($CORE), the platform and ${#roms[@]} instance JSON(s)"
 
+# the other versions' JSONs from before _alternatives/, and their saves
+saves="$VOL/Saves/$PLATFORM/$CORE"
+for s in $ALTS; do
+	old="$VOL/Assets/$PLATFORM/$CORE/$s.json"
+	[ -f "$old" ] && { rm -f "$old"; echo "  $s.json moved to _alternatives/"; }
+	if [ -f "$saves/$s.sav" ] && [ ! -f "$saves/_alternatives/$s.sav" ]; then
+		mkdir -p "$saves/_alternatives"
+		cp -p "$saves/$s.sav" "$saves/_alternatives/$s.sav"
+		echo "  $s.sav copied to Saves/.../_alternatives/"
+	fi
+done
+
 # the ROM images: only those that differ
 common="$VOL/Assets/$PLATFORM/common"
 mkdir -p "$common"
@@ -179,7 +201,7 @@ for s in ${roms[@]+"${roms[@]}"}; do
 done
 
 # drop the ._ AppleDouble files macOS writes beside them on a FAT card
-for d in "$VOL/Cores/$CORE" "$VOL/Platforms" "$VOL/Assets/$PLATFORM"; do
+for d in "$VOL/Cores/$CORE" "$VOL/Platforms" "$VOL/Assets/$PLATFORM" "$VOL/Saves/$PLATFORM"; do
 	dot_clean -m "$d" 2>/dev/null || true
 done
 
