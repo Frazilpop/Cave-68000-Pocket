@@ -32,9 +32,11 @@
 # put back) needs its line written by hand, from its timing report.
 #
 # The sets in ALTS are each game's other versions: their instance JSONs live in
-# _alternatives/. A card from before that still has them beside the games;
-# they are taken off it, and a save the Pocket kept for one of them is copied
-# into Saves/.../_alternatives/ (the old one left where it was).
+# _alternatives/, and the Pocket keeps their saves in Saves/.../_alternatives/
+# (the instance's path mirrored; seen on the card, 15 Oct). A card from before
+# that still has the JSONs beside the games: they are taken off it, and a save
+# the Pocket kept for one of them beside the games is moved into
+# _alternatives/, or dropped when the one there is as new.
 
 set -euo pipefail
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -163,10 +165,17 @@ saves="$VOL/Saves/$PLATFORM/$CORE"
 for s in $ALTS; do
 	old="$VOL/Assets/$PLATFORM/$CORE/$s.json"
 	[ -f "$old" ] && { rm -f "$old"; echo "  $s.json moved to _alternatives/"; }
-	if [ -f "$saves/$s.sav" ] && [ ! -f "$saves/_alternatives/$s.sav" ]; then
+	flat="$saves/$s.sav" alt="$saves/_alternatives/$s.sav"
+	[ -f "$flat" ] || continue
+	if [ ! -f "$alt" ]; then
 		mkdir -p "$saves/_alternatives"
-		cp -p "$saves/$s.sav" "$saves/_alternatives/$s.sav"
-		echo "  $s.sav copied to Saves/.../_alternatives/"
+		mv "$flat" "$alt"
+		echo "  $s.sav moved to Saves/.../_alternatives/"
+	elif [ "$flat" -nt "$alt" ]; then
+		echo "  Warning: $s.sav beside the games is newer than the one in _alternatives/ - both left for a look"
+	else
+		rm -f "$flat"
+		echo "  $s.sav beside the games dropped (the one in _alternatives/ is as new)"
 	fi
 done
 
