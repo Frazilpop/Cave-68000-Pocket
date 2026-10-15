@@ -6,11 +6,11 @@
                 "cave68000"
             ],
             "shortname": "Cave 68000",
-            "description": "Cave's 68000 shoot-'em-ups – DonPachi, DoDonPachi, ESP Ra.De., Guwange and the rest of the board's games – on the Analogue Pocket.",
+            "description": "Eight Cave 68000 arcade games, DonPachi to Guwange",
             "author": "frazilpop",
             "url": "https://github.com/Frazilpop/Cave-68000-Pocket",
-            "version": "0.0.0",
-            "date_release": "2026-10-13"
+            "version": "1.0.0",
+            "date_release": "2026-10-15"
         },
         "framework": {
             "target_product": "Analogue Pocket",
