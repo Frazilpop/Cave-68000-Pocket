@@ -4,9 +4,9 @@
 // Upstream kept the EEPROM's contents in SDRAM behind a write-back cache and
 // seeded it from the MRA; the board (EEPROM.sv) reads and writes it through
 // the `ee` port: a byte address {word, 0}, a read answered the next clock.
-// Here the store is a dual-port block RAM, the board on one port and the
-// platform on the other, and it is filled twice over at boot, in the order
-// APF loads the data slots:
+// Here the store is a dual-port block RAM (one M10K), the board on one port
+// and the platform on the other, and it is filled twice over at boot, in the
+// order APF loads the data slots:
 //
 //   1. as the loader streams the ROM image past (dl_*), the EEPROM region
 //      (128 bytes at the game's eeprom_offset) is copied in: the factory
@@ -27,6 +27,15 @@
 // bytes swapped.
 //
 // nv_dirty rises when the game writes a word.
+//
+// Each port is written in the form Quartus turns into a true dual-port M10K:
+// a write cycle's read gives the word just written. Written as a plain
+// array read beside the write (the old word), the store came out as 1,024
+// flip-flops and some 2,400 logic cells, 15 % of the device, and the main
+// build met timing by luck (seen in the fitter's report, 15 Oct). Neither
+// side reads on a cycle it writes: the EEPROM's state machine reads or
+// writes, never both, and the save slot's scanner voids its read on a write
+// cycle (pocket_nvram).
 
 `default_nettype none
 
@@ -61,7 +70,7 @@ module cave_eeprom_store #(
   input  wire         nv_dirty_clr
 );
 
-  reg [15:0] mem [0:63];
+  (* ramstyle = "M10K" *) reg [15:0] mem [0:63];
 
   // The whole address is compared: an image larger than 32 MB (esprade's
   // 43, guwange's 55) passes the region's address modulo 32 MB again, and a
@@ -73,8 +82,11 @@ module cave_eeprom_store #(
   // ------------------------------------------------------- board's port
   wire [5:0] ee_w = ee_addr[6:1];
   always @(posedge clk) begin
-    if (ee_wr) mem[ee_w] <= ee_din;
-    ee_dout <= mem[ee_w];
+    if (ee_wr) begin
+      mem[ee_w] <= ee_din;
+      ee_dout   <= ee_din;
+    end else
+      ee_dout   <= mem[ee_w];
   end
 
   always @(posedge clk) begin
@@ -90,8 +102,11 @@ module cave_eeprom_store #(
   wire [15:0] b_din  = seed_hit ? {dl_data[7:0], dl_data[15:8]} : {nv_din[7:0], nv_din[15:8]};
   reg  [15:0] b_q;
   always @(posedge clk) begin
-    if (b_we) mem[b_addr] <= b_din;
-    b_q <= mem[b_addr];
+    if (b_we) begin
+      mem[b_addr] <= b_din;
+      b_q         <= b_din;
+    end else
+      b_q         <= mem[b_addr];
   end
   assign nv_dout = {b_q[7:0], b_q[15:8]};
 
