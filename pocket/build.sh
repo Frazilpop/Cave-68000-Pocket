@@ -24,7 +24,10 @@
 # written to pocket/dist/Cores/frazilpop.Cave 68000/bitstream.rbf_r (with
 # --oki, donpachi.rbf_r, which DonPachi's instance JSONs select). On negative
 # slack the script fails and leaves dist alone; the bitstream it made is kept
-# as build/pocket/quartus/<name>.failed for a look. Takes the same lock as
+# as build/pocket/quartus/<name>.failed for a look. A bitstream that met
+# timing is recorded in build/pocket/bitstreams.txt (SHA-256, name, the
+# commit its sources came from, when), and tools/pocket/deploy.sh puts only a
+# recorded bitstream on the card. Takes the same lock as
 # pocket/fit/fit.sh: one Quartus at a time in this repository.
 
 set -eu
@@ -112,6 +115,13 @@ if [ "$clean" = 1 ]; then
     echo "== clean: emptying $qb/db and $qb/incremental_db"
     find "$qb/db" "$qb/incremental_db" -mindepth 1 -delete
 fi
+
+# The sources as the compile reads them: the commit, and "+changes" when the
+# working tree differs from it (apf/build_id.mif aside, which every compile
+# rewrites).
+src=$(git -C "$repo" rev-parse --short HEAD)
+[ -z "$(git -C "$repo" status --porcelain -- rtl pocket/src \
+        ':(exclude)pocket/src/fpga/apf/build_id.mif')" ] || src=$src+changes
 
 log=$qb/compile.log
 [ "$rev" = ap_core ] || log=$qb/compile_$rev.log
@@ -217,4 +227,6 @@ if [ "$status" != 0 ]; then
 fi
 mkdir -p "$dist"
 mv "$rbf_r" "$dist/$out_name"
-echo "== written: $dist/$out_name"
+sha=$(shasum -a 256 "$dist/$out_name" | cut -d' ' -f1)
+echo "$sha $out_name $src $(date '+%Y-%m-%d %H:%M') timing met" >> "$repo/build/pocket/bitstreams.txt"
+echo "== written: $dist/$out_name (sources $src, SHA-256 ${sha%"${sha#????????}"})"
