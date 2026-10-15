@@ -19,12 +19,13 @@
 # build/pocket/quartus/, made here on first use. The one exception is Analogue's
 # own pre-flow script, which rewrites apf/build_id.mif with the build date.
 #
-# Afterwards: the bit-reversed bitstream the Pocket loads is written to
-# pocket/dist/Cores/frazilpop.Cave 68000/bitstream.rbf_r (with --oki,
-# donpachi.rbf_r, which DonPachi's instance JSONs select), and the fit and the
-# worst slack per clock are printed. The script fails if any clock has
-# negative slack. Takes the same lock as pocket/fit/fit.sh: one Quartus at a
-# time in this repository.
+# Afterwards: the fit and the worst slack per clock are printed, and only if
+# every clock meets timing is the bit-reversed bitstream the Pocket loads
+# written to pocket/dist/Cores/frazilpop.Cave 68000/bitstream.rbf_r (with
+# --oki, donpachi.rbf_r, which DonPachi's instance JSONs select). On negative
+# slack the script fails and leaves dist alone; the bitstream it made is kept
+# as build/pocket/quartus/<name>.failed for a look. Takes the same lock as
+# pocket/fit/fit.sh: one Quartus at a time in this repository.
 
 set -eu
 
@@ -137,8 +138,7 @@ fi
 # ------------------------------------------------------------- bitstream
 rbf=$qb/output_files/$rev.rbf
 [ -f "$rbf" ] || { echo "build.sh: no $rbf" >&2; exit 1; }
-mkdir -p "$dist"
-rbf_r=$dist/$out_name
+rbf_r=$qb/$out_name.new
 python3 -I - "$rbf" "$rbf_r" <<'EOF'
 import sys
 # APF wants every byte of the .rbf bit-reversed (Analogue: Packaging a Core).
@@ -146,11 +146,12 @@ src, dst = sys.argv[1], sys.argv[2]
 table = bytes(int(f"{b:08b}"[::-1], 2) for b in range(256))
 data = open(src, "rb").read()
 open(dst, "wb").write(data.translate(table))
-print(f"== bitstream: {dst} ({len(data)} bytes)")
+print(f"== bitstream: {len(data)} bytes")
 EOF
 
 # ------------------------------------------------------------- reports
-python3 -I - "$qb/output_files" "$rev" <<'EOF'
+status=0
+python3 -I - "$qb/output_files" "$rev" <<'EOF' || status=$?
 import os, re, sys
 out, rev = sys.argv[1], sys.argv[2]
 
@@ -205,3 +206,15 @@ if fail:
     sys.exit(1)
 print("== timing met")
 EOF
+
+# ------------------------------------------------------------- dist
+# A bitstream that misses timing never reaches dist, so deploy.sh cannot put
+# it on the card.
+if [ "$status" != 0 ]; then
+    mv "$rbf_r" "$qb/$out_name.failed"
+    echo "== $out_name NOT written to dist; kept as $qb/$out_name.failed" >&2
+    exit 1
+fi
+mkdir -p "$dist"
+mv "$rbf_r" "$dist/$out_name"
+echo "== written: $dist/$out_name"
