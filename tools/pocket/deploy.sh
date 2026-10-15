@@ -23,6 +23,12 @@
 # /tmp/pocket-card.lock. Nothing ejects the card; that is done by hand.
 # Each verified copy is recorded in build/pocket/deployed.txt (the bitstream's
 # SHA-256, when it was built, the commit, when it was copied).
+#
+# Only a bitstream that met timing goes on the card: pocket/build.sh records
+# each one it writes to dist in build/pocket/bitstreams.txt (SHA-256, name,
+# the commit of its sources), and a bitstream in dist with no record there is
+# refused. One put into dist by hand (a seed sweep's winner, an older build
+# put back) needs its line written by hand, from its timing report.
 
 set -euo pipefail
 REPO="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -33,35 +39,51 @@ BIN="$DIST/Cores/$CORE/bitstream.rbf_r"
 BIN_OKI="$DIST/Cores/$CORE/donpachi.rbf_r"     # pocket/build.sh --oki
 ROMS="$REPO/build/pocket"
 RECORD="$ROMS/deployed.txt"
+BUILDS="$ROMS/bitstreams.txt"                   # written by pocket/build.sh
 ROMREC="$ROMS/deployed-roms.txt"
 SETS="ddonpach ddonpachj esprade espradej espradejo guwange guwanges feversos dfeveron uopoko uopokoj gaia theroes theroesa
       donpachi donpachij donpachijs donpachikr donpachihk"      # the target sets
 [ -f "$BIN" ] || { echo "no $BIN - run pocket/build.sh first"; exit 1; }
 [ -f "$BIN_OKI" ] || echo "Warning: no $BIN_OKI - DonPachi's sets will not start (pocket/build.sh --oki)"
 
+sha() { shasum -a 256 "$1" | cut -d' ' -f1; }
+# the commit a bitstream was built from, if build/pocket/bitstreams.txt has it
+source_of() { awk -v h="$1" '$1 == h { c = $3 } END { print c }' "$BUILDS" 2>/dev/null; }
+for f in "$BIN" "$BIN_OKI"; do
+	[ -f "$f" ] || continue
+	[ -n "$(source_of "$(sha "$f")")" ] || {
+		echo "$(basename "$f") in dist is not a recorded build that met timing (no line in $BUILDS) - not deploying"
+		exit 1; }
+done
+
 VOL="" STATUS=0 FULL=0
 for a in "$@"; do
 	case "$a" in --keep) ;; --status) STATUS=1 ;; --full) FULL=1 ;; *) VOL="$a" ;; esac
 done
 
-built() { stat -f '%Sm' -t '%Y-%m-%d %H:%M' "$BIN"; }
-sha() { shasum -a 256 "$1" | cut -d' ' -f1; }
+built() {   # when the main bitstream was built: its record's date, else the file's
+	local d; d=$(awk -v h="$(sha "$BIN")" '$1 == h { d = $4 " " $5 } END { print d }' "$BUILDS" 2>/dev/null)
+	[ -n "$d" ] && echo "$d" || stat -f '%Sm' -t '%Y-%m-%d %H:%M' "$BIN"
+}
 if [ $STATUS = 1 ]; then
-	s=$(sha "$BIN")
-	echo "Build:   $(built), SHA-256 ${s:0:12}"
+	s=$(sha "$BIN") so=none
+	[ -f "$BIN_OKI" ] && so=$(sha "$BIN_OKI")
+	echo "Build:   $(built), SHA-256 ${s:0:12}, DonPachi's ${so:0:12}"
 	last=$(sed -n 's/^sha256 //p' "$RECORD" 2>/dev/null || true)
+	lasto=$(sed -n 's/^oki_sha256 //p' "$RECORD" 2>/dev/null || true)
 	if [ -z "$last" ]; then
 		echo "Card:    no deploy recorded"
 	else
-		echo "Card:    got the build of $(sed -n 's/^built //p' "$RECORD") at $(sed -n 's/^deployed //p' "$RECORD"), SHA-256 ${last:0:12}"
+		echo "Card:    got the build of $(sed -n 's/^built //p' "$RECORD") at $(sed -n 's/^deployed //p' "$RECORD"), SHA-256 ${last:0:12}, DonPachi's ${lasto:0:12}"
 	fi
 	for v in /Volumes/*; do
 		[ -f "$v/Analogue_Pocket.json" ] || continue
-		f="$v/Cores/$CORE/bitstream.rbf_r"
+		f="$v/Cores/$CORE/bitstream.rbf_r" g="$v/Cores/$CORE/donpachi.rbf_r"
 		[ -f "$f" ] && last=$(sha "$f") || last=none
-		echo "         (checked on the mounted card, $v: ${last:0:12})"
+		[ -f "$g" ] && lasto=$(sha "$g") || lasto=none
+		echo "         (checked on the mounted card, $v: ${last:0:12}, DonPachi's ${lasto:0:12})"
 	done
-	if [ "$last" = "$s" ]; then echo "UP TO DATE - the card has the current build"
+	if [ "$last" = "$s" ] && [ "$lasto" = "$so" ]; then echo "UP TO DATE - the card has the current build"
 	else echo "NOT ON THE CARD - the current build has not been deployed: tools/pocket/deploy.sh"; exit 1; fi
 	exit 0
 fi
@@ -170,7 +192,9 @@ if [ -f "$BIN_OKI" ]; then
 	echo "DonPachi's bitstream SHA-256 verified on the card (built $(stat -f '%Sm' -t '%Y-%m-%d %H:%M' "$BIN_OKI"))"
 fi
 mkdir -p "$ROMS"
-printf 'sha256 %s\nbuilt %s\ncommit %s\ndeployed %s\noki_sha256 %s\n' "$a" "$(built)" \
-	"$(git -C "$REPO" log -1 --format=%h 2>/dev/null)" "$(date '+%Y-%m-%d %H:%M')" "$oki" >"$RECORD"
+okisrc=none
+[ "$oki" = none ] || okisrc=$(source_of "$oki")
+printf 'sha256 %s\nbuilt %s\ncommit %s\ndeployed %s\noki_sha256 %s\noki_commit %s\n' "$a" "$(built)" \
+	"$(source_of "$a")" "$(date '+%Y-%m-%d %H:%M')" "$oki" "$okisrc" >"$RECORD"
 echo "Bitstream SHA-256 verified on the card: the build of $(built) is on $VOL"
 echo "Left $VOL mounted - eject it yourself, then back in the Pocket and launch: openFPGA > Arcade > Cave 68000"
