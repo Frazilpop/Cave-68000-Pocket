@@ -17,76 +17,76 @@ module CaveProgramRomReadFreezer(
   input         io_out_valid
 );
 
+  // The 68000's program ROM reads, carried from its clock (io_targetClock,
+  // 32 MHz) to the memory side's (clock, 96 MHz) and back. The two are
+  // zero-phase 3:1 outputs of one PLL, so every rising edge of the CPU's
+  // clock is a rising edge of the system's, and a register in either domain
+  // may read a register of the other across one system period: a path
+  // launched on one rising edge and caught on the next. Nothing here is
+  // clocked on a falling edge. The first form of this bridge staged the
+  // crossing on the 96 MHz falling edge in both directions, which left each
+  // half of it half a period, 5.2 ns, and that half-period held the worst
+  // path of every compile: the cache's data into the published word, and
+  // the published toggle through Main's DTACK logic.
+  //
+  // The CPU holds rd and addr for the whole bus cycle, so the system side
+  // reads them as they are and turns the level into one request with
+  // request_seen_system, cleared when rd drops. The response is published
+  // in two ways that reach the CPU on the same edge the half-period staging
+  // did: on the period the memory answers (response_arrived), the CPU edge
+  // that follows it takes the data straight off io_out_dout; on the edge
+  // after, the data and a toggle are registered here and a later CPU edge
+  // reads those. The CPU side marks what it has taken by setting its copy of
+  // the toggle to the value the toggle is about to have (the published one,
+  // inverted when it took the early form), and the next request waits for
+  // that copy to equal the toggle, as before.
+
   localparam STATE_IDLE = 1'b0;
   localparam STATE_WAIT = 1'b1;
 
   reg        response_toggle_cpu_seen = 1'b0;
 
-  reg        request_level_system = 1'b0;
-  reg [21:0] request_addr_sampled = 22'd0;
   reg        request_seen_system = 1'b0;
   reg        request_active_system = 1'b0;
   reg [21:0] request_addr_system = 22'd0;
   reg        state_reg = STATE_IDLE;
-  reg        response_toggle_system_seen = 1'b0;
   reg [15:0] response_data_published = 16'd0;
   reg        response_toggle_published = 1'b0;
-  reg        response_ack_system = 1'b0;
 
   wire incoming_request =
-    request_level_system &&
+    io_in_rd &&
     !request_seen_system &&
     !request_active_system &&
     state_reg == STATE_IDLE &&
-    response_toggle_published == response_ack_system;
+    response_toggle_published == response_toggle_cpu_seen;
   wire issue_read =
     request_active_system || incoming_request;
   wire accepted_read =
     issue_read && io_out_wait_n;
-  wire response_ready_cpu =
+  wire response_arrived =
+    state_reg == STATE_WAIT && io_out_valid;
+  wire response_pending_cpu =
     response_toggle_published != response_toggle_cpu_seen;
+  wire response_ready_cpu =
+    response_pending_cpu || response_arrived;
 
-  // clk_sys and clk_cpu are zero-phase 3:1 outputs of the same PLL. The
-  // intervening 96 MHz falling edges provide explicit half-cycle timing
-  // boundaries in both directions. A rejected first read beat is held through
-  // backpressure.
-  always @(negedge clock) begin
-    if (reset) begin
-      request_level_system <= 1'b0;
-      request_addr_sampled <= 22'd0;
-      response_data_published <= 16'd0;
-      response_toggle_published <= 1'b0;
-      response_ack_system <= 1'b0;
-    end
-    else begin
-      request_level_system <= io_in_rd;
-      request_addr_sampled <= io_in_addr;
-      response_ack_system <= response_toggle_cpu_seen;
-
-      if (state_reg == STATE_WAIT &&
-          io_out_valid &&
-          response_toggle_published == response_toggle_system_seen) begin
-        response_data_published <= io_out_dout;
-        response_toggle_published <= ~response_toggle_published;
-      end
-    end
-  end
-
+  // A rejected first read beat is held through backpressure.
   always @(posedge clock) begin
     if (reset) begin
       request_seen_system <= 1'b0;
       request_active_system <= 1'b0;
       request_addr_system <= 22'd0;
       state_reg <= STATE_IDLE;
-      response_toggle_system_seen <= 1'b0;
+      response_data_published <= 16'd0;
+      response_toggle_published <= 1'b0;
     end
     else begin
-      if (!request_level_system)
+      if (!io_in_rd)
         request_seen_system <= 1'b0;
 
       if (incoming_request) begin
         request_seen_system <= 1'b1;
-        request_addr_system <= request_addr_sampled;
+        request_addr_system <= io_in_addr;
         if (!io_out_wait_n)
           request_active_system <= 1'b1;
       end
@@ -96,70 +96,30 @@ module CaveProgramRomReadFreezer(
         state_reg <= STATE_WAIT;
       end
 
-      if (state_reg == STATE_WAIT &&
-          response_toggle_published != response_toggle_system_seen) begin
-        response_toggle_system_seen <= response_toggle_published;
+      if (response_arrived) begin
+        response_data_published <= io_out_dout;
+        response_toggle_published <= ~response_toggle_published;
         state_reg <= STATE_IDLE;
       end
     end
   end
 
-  // Main and this acknowledgement register see response_ready_cpu on the same
-  // CPU rising edge. Main captures the held data before the acknowledgement
-  // crosses back through the next 96 MHz falling edge.
+  // Main and this register see response_ready_cpu on the same CPU rising
+  // edge: Main takes the data, this records the response as taken. An early
+  // response and a pending toggle never coincide, as a request is not issued
+  // until the toggle has been taken.
   always @(posedge io_targetClock) begin
     if (io_targetReset)
       response_toggle_cpu_seen <= 1'b0;
     else if (response_ready_cpu)
-      response_toggle_cpu_seen <= response_toggle_published;
+      response_toggle_cpu_seen <= response_toggle_published ^ response_arrived;
   end
 
-  assign io_in_dout = response_data_published;
+  assign io_in_dout = response_arrived ? io_out_dout : response_data_published;
   assign io_in_valid = response_ready_cpu;
   assign io_out_rd = issue_read;
   assign io_out_addr =
-    request_active_system ? request_addr_system : request_addr_sampled;
-
-`ifdef CAVE_SIGNALTAP_BOOT_DIAGNOSTIC
-  (* preserve, noprune *) reg [63:0] cave_boot_bridge_trace = 64'd0;
-
-  always @(negedge clock) begin
-    cave_boot_bridge_trace[21:0] <= request_addr_sampled;
-    cave_boot_bridge_trace[37:22] <= response_data_published;
-    cave_boot_bridge_trace[38] <= reset;
-    cave_boot_bridge_trace[39] <= io_in_rd;
-    cave_boot_bridge_trace[40] <= io_in_valid;
-    cave_boot_bridge_trace[41] <= io_out_rd;
-    cave_boot_bridge_trace[42] <= io_out_wait_n;
-    cave_boot_bridge_trace[43] <= io_out_valid;
-    cave_boot_bridge_trace[44] <= request_level_system;
-    cave_boot_bridge_trace[45] <= request_seen_system;
-    cave_boot_bridge_trace[46] <= request_active_system;
-    cave_boot_bridge_trace[47] <= state_reg;
-    cave_boot_bridge_trace[48] <= response_toggle_published;
-    cave_boot_bridge_trace[49] <= response_toggle_system_seen;
-    cave_boot_bridge_trace[50] <= response_toggle_cpu_seen;
-    cave_boot_bridge_trace[51] <= response_ack_system;
-    cave_boot_bridge_trace[52] <= incoming_request;
-    cave_boot_bridge_trace[53] <= issue_read;
-    cave_boot_bridge_trace[54] <= accepted_read;
-    cave_boot_bridge_trace[55] <= response_ready_cpu;
-    cave_boot_bridge_trace[56] <= request_addr_sampled == io_in_addr;
-    cave_boot_bridge_trace[57] <=
-      (request_active_system ? request_addr_system : request_addr_sampled) ==
-        io_out_addr;
-    cave_boot_bridge_trace[58] <= state_reg == STATE_WAIT;
-    cave_boot_bridge_trace[59] <=
-      response_toggle_published == response_ack_system;
-    cave_boot_bridge_trace[60] <=
-      response_toggle_published == response_toggle_system_seen;
-    cave_boot_bridge_trace[61] <=
-      io_out_valid && state_reg == STATE_WAIT;
-    cave_boot_bridge_trace[62] <= io_in_rd && !io_in_valid;
-    cave_boot_bridge_trace[63] <=
-      io_out_dout == response_data_published;
-  end
-`endif
+    request_active_system ? request_addr_system : io_in_addr;
 endmodule
 
 module CaveEepromDataFreezer(
