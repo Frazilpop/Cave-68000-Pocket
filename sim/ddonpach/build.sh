@@ -44,8 +44,8 @@ if [ "$pocket" = 1 ]; then
     --top-module cave68000_psim --Mdir "$obj" -o tb_pocket \
     -CFLAGS "-O2 -DPOCKET_MEM" "$@" \
     rtl/mem/*.sv rtl/top/cave68000_mem.sv \
-    pocket/src/fpga/core/pocket_psram_rows.sv \
-    sim/models/sdram_model.sv sim/models/psram_model.sv \
+    pocket/src/fpga/core/pocket_psram_rows.sv pocket/src/fpga/core/pocket_sram.sv \
+    sim/models/sdram_model.sv sim/models/psram_model.sv sim/models/sram_model.sv \
     sim/ddonpach/cave68000_psim.sv sim/ddonpach/tb_ddonpach.cpp
 else
   obj=${OBJ:-build/obj_ddonpach}

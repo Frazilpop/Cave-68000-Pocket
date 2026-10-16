@@ -5,8 +5,9 @@
 #   tools/pocket/deploy.sh --status                   is the current build on the card?
 #   tools/pocket/deploy.sh --full                     compare every ROM image on the card byte for byte
 #
-# Copies pocket/dist ("Cores/frazilpop.Cave 68000" with the two bitstreams –
-# bitstream.rbf_r for the YMZ280B games, donpachi.rbf_r for DonPachi's sets – the
+# Copies pocket/dist ("Cores/frazilpop.Cave 68000" with the three bitstreams –
+# bitstream.rbf_r for the YMZ280B games, donpachi.rbf_r for DonPachi's sets,
+# agallet.rbf_r for Air Gallet's and Sailor Moon's – the
 # platform JSON and image, the instance JSONs under Assets/cave68000/ – one
 # for each game, the other versions in _alternatives/ beside them) onto the
 # Pocket's SD card, and each target set's build/pocket/<set>.rom (made by
@@ -45,21 +46,28 @@ PLATFORM="cave68000"
 DIST="$REPO/pocket/dist"
 BIN="$DIST/Cores/$CORE/bitstream.rbf_r"
 BIN_OKI="$DIST/Cores/$CORE/donpachi.rbf_r"     # pocket/build.sh --oki
+BIN_Z80="$DIST/Cores/$CORE/agallet.rbf_r"      # pocket/build.sh --z80
 ROMS="$REPO/build/pocket"
 RECORD="$ROMS/deployed.txt"
 BUILDS="$ROMS/bitstreams.txt"                   # written by pocket/build.sh
 ROMREC="$ROMS/deployed-roms.txt"
 SETS="ddonpach ddonpachj esprade espradej espradejo guwange guwanges feversos dfeveron uopoko uopokoj gaia theroes theroesa
-      donpachi donpachij donpachijs donpachikr donpachihk"      # the target sets
+      donpachi donpachij donpachijs donpachikr donpachihk
+      agallet agalletu agalletj agalletk agallett agalleth agalleta agalletau agalletaj agalletak agalletat agalletah
+      sailormn sailormne sailormnu sailormnk sailormnt sailormnh sailormnnj sailormnne sailormnnu sailormnnk sailormnnt
+      sailormnnh sailormnoj sailormnoe sailormnou sailormnok sailormnot sailormnoh"   # the target sets
 ALTS="ddonpachj espradej espradejo guwanges feversos uopokoj theroesa
       donpachij donpachijs donpachikr donpachihk"               # in _alternatives/
+# (Air Gallet's and Sailor Moon's other versions were never beside the games
+# on a card, so ALTS has nothing to tidy for them.)
 [ -f "$BIN" ] || { echo "no $BIN - run pocket/build.sh first"; exit 1; }
 [ -f "$BIN_OKI" ] || echo "Warning: no $BIN_OKI - DonPachi's sets will not start (pocket/build.sh --oki)"
+[ -f "$BIN_Z80" ] || echo "Warning: no $BIN_Z80 - Air Gallet's and Sailor Moon's sets will not start (pocket/build.sh --z80)"
 
 sha() { shasum -a 256 "$1" | cut -d' ' -f1; }
 # the commit a bitstream was built from, if build/pocket/bitstreams.txt has it
 source_of() { awk -v h="$1" '$1 == h { c = $3 } END { print c }' "$BUILDS" 2>/dev/null; }
-for f in "$BIN" "$BIN_OKI"; do
+for f in "$BIN" "$BIN_OKI" "$BIN_Z80"; do
 	[ -f "$f" ] || continue
 	[ -n "$(source_of "$(sha "$f")")" ] || {
 		echo "$(basename "$f") in dist is not a recorded build that met timing (no line in $BUILDS) - not deploying"
@@ -76,24 +84,28 @@ built() {   # when the main bitstream was built: its record's date, else the fil
 	[ -n "$d" ] && echo "$d" || stat -f '%Sm' -t '%Y-%m-%d %H:%M' "$BIN"
 }
 if [ $STATUS = 1 ]; then
-	s=$(sha "$BIN") so=none
+	s=$(sha "$BIN") so=none sz=none
 	[ -f "$BIN_OKI" ] && so=$(sha "$BIN_OKI")
-	echo "Build:   $(built), SHA-256 ${s:0:12}, DonPachi's ${so:0:12}"
+	[ -f "$BIN_Z80" ] && sz=$(sha "$BIN_Z80")
+	echo "Build:   $(built), SHA-256 ${s:0:12}, DonPachi's ${so:0:12}, the Z80's ${sz:0:12}"
 	last=$(sed -n 's/^sha256 //p' "$RECORD" 2>/dev/null || true)
 	lasto=$(sed -n 's/^oki_sha256 //p' "$RECORD" 2>/dev/null || true)
+	lastz=$(sed -n 's/^z80_sha256 //p' "$RECORD" 2>/dev/null || true)
+	[ -n "$lastz" ] || lastz=none
 	if [ -z "$last" ]; then
 		echo "Card:    no deploy recorded"
 	else
-		echo "Card:    got the build of $(sed -n 's/^built //p' "$RECORD") at $(sed -n 's/^deployed //p' "$RECORD"), SHA-256 ${last:0:12}, DonPachi's ${lasto:0:12}"
+		echo "Card:    got the build of $(sed -n 's/^built //p' "$RECORD") at $(sed -n 's/^deployed //p' "$RECORD"), SHA-256 ${last:0:12}, DonPachi's ${lasto:0:12}, the Z80's ${lastz:0:12}"
 	fi
 	for v in /Volumes/*; do
 		[ -f "$v/Analogue_Pocket.json" ] || continue
-		f="$v/Cores/$CORE/bitstream.rbf_r" g="$v/Cores/$CORE/donpachi.rbf_r"
+		f="$v/Cores/$CORE/bitstream.rbf_r" g="$v/Cores/$CORE/donpachi.rbf_r" z="$v/Cores/$CORE/agallet.rbf_r"
 		[ -f "$f" ] && last=$(sha "$f") || last=none
 		[ -f "$g" ] && lasto=$(sha "$g") || lasto=none
-		echo "         (checked on the mounted card, $v: ${last:0:12}, DonPachi's ${lasto:0:12})"
+		[ -f "$z" ] && lastz=$(sha "$z") || lastz=none
+		echo "         (checked on the mounted card, $v: ${last:0:12}, DonPachi's ${lasto:0:12}, the Z80's ${lastz:0:12})"
 	done
-	if [ "$last" = "$s" ] && [ "$lasto" = "$so" ]; then echo "UP TO DATE - the card has the current build"
+	if [ "$last" = "$s" ] && [ "$lasto" = "$so" ] && [ "$lastz" = "$sz" ]; then echo "UP TO DATE - the card has the current build"
 	else echo "NOT ON THE CARD - the current build has not been deployed: tools/pocket/deploy.sh"; exit 1; fi
 	exit 0
 fi
@@ -222,10 +234,17 @@ if [ -f "$BIN_OKI" ]; then
 	[ "$oki" = "$(sha "$VOL/Cores/$CORE/donpachi.rbf_r")" ] || { echo "donpachi.rbf_r on the card differs from the build"; exit 1; }
 	echo "DonPachi's bitstream SHA-256 verified on the card (built $(stat -f '%Sm' -t '%Y-%m-%d %H:%M' "$BIN_OKI"))"
 fi
+z80=none
+if [ -f "$BIN_Z80" ]; then
+	z80=$(sha "$BIN_Z80")
+	[ "$z80" = "$(sha "$VOL/Cores/$CORE/agallet.rbf_r")" ] || { echo "agallet.rbf_r on the card differs from the build"; exit 1; }
+	echo "Air Gallet's and Sailor Moon's bitstream SHA-256 verified on the card (built $(stat -f '%Sm' -t '%Y-%m-%d %H:%M' "$BIN_Z80"))"
+fi
 mkdir -p "$ROMS"
-okisrc=none
+okisrc=none z80src=none
 [ "$oki" = none ] || okisrc=$(source_of "$oki")
-printf 'sha256 %s\nbuilt %s\ncommit %s\ndeployed %s\noki_sha256 %s\noki_commit %s\n' "$a" "$(built)" \
-	"$(source_of "$a")" "$(date '+%Y-%m-%d %H:%M')" "$oki" "$okisrc" >"$RECORD"
+[ "$z80" = none ] || z80src=$(source_of "$z80")
+printf 'sha256 %s\nbuilt %s\ncommit %s\ndeployed %s\noki_sha256 %s\noki_commit %s\nz80_sha256 %s\nz80_commit %s\n' "$a" "$(built)" \
+	"$(source_of "$a")" "$(date '+%Y-%m-%d %H:%M')" "$oki" "$okisrc" "$z80" "$z80src" >"$RECORD"
 echo "Bitstream SHA-256 verified on the card: the build of $(built) is on $VOL"
 echo "Left $VOL mounted - eject it yourself, then back in the Pocket and launch: openFPGA > Arcade > Cave 68000"

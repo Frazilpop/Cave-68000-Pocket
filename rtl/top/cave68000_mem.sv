@@ -16,11 +16,14 @@
 //   dl    the loader's stream past the SDRAM, for the EEPROM's seed (and on
 //         the Z80 build the sound CPU's first 16 KB, which the board keeps).
 //   nv    the 93C46's store for the save slot (cave_eeprom_store).
+//   xram  the 68000's own RAM, on the Z80 build only (cave68000's xram,
+//         passed through on clk_cpu): the shell keeps it in the Pocket's
+//         SRAM (pocket_sram).
 //
 // Platform-neutral like the board: the Pocket shell serves these ports with
 // kaneko_sdram and the PSRAM servants, the simulation harness
 // (sim/ddonpach/cave68000_psim.sv) with the same controller and models of
-// the parts. Everything here runs on clk.
+// the parts. Everything here runs on clk but xram, on clk_cpu.
 
 `default_nettype none
 
@@ -64,6 +67,13 @@ module cave68000_mem #(
   input  wire [AW:1]   dl_addr,
   input  wire [15:0]   dl_data,
 
+  // the 68000's own RAM (CAVE_Z80), on clk_cpu
+  output wire          xram_rd,
+  output wire          xram_wr,
+  output wire [15:0]   xram_addr,
+  output wire [1:0]    xram_mask,
+  output wire [15:0]   xram_din,
+  input  wire [15:0]   xram_dout,
   // the save slot
   input  wire [5:0]    nv_addr,
   input  wire [15:0]   nv_din,
@@ -145,6 +155,8 @@ module cave68000_mem #(
     .clk_vid (clk_vid), .rst_vid (rst_vid),
     .rom_loaded (rom_loaded), .game (game),
     .dl_wr (dl_wr), .dl_addr (dlWord), .dl_data (dl_data),
+    .xram_rd (xram_rd), .xram_wr (xram_wr), .xram_addr (xram_addr),
+    .xram_mask (xram_mask), .xram_din (xram_din), .xram_dout (xram_dout),
     .p1 (p1), .p2 (p2), .coin (coin), .start (start),
     .service (service), .pause (pause), .dsw (dsw),
     .prog_rd (prog_rd), .prog_addr (prog_a), .prog_dout (prog_dout),

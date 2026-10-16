@@ -131,7 +131,11 @@ set_false_path -to [get_ports {dram_cke}]
 # 9 ns + the round trip to 22.8 ns + the round trip. Those margins are
 # cycles, not picoseconds, and the fitter is told not to second-guess them;
 # the latencies are measured on the part at power-up and shown on the
-# overlay. The SRAM is not used (its pins are held).
+# overlay. The SRAM is the Z80 build's 68000 RAM (pocket_sram, clk_cpu; its
+# pins held on the other builds): an asynchronous part with no clock to time
+# against, every pin a register in its I/O cell, and three clocks (93.75 ns)
+# from an address to its word being taken where the part needs ~62 – again
+# cycles, written down in pocket_sram's header.
 set_false_path -to   [get_ports {cram0_* cram1_*}]
 set_false_path -from [get_ports {cram0_dq[*] cram1_dq[*] cram0_wait cram1_wait}]
 set_false_path -to   [get_ports {sram_a[*] sram_dq[*] sram_oe_n sram_we_n sram_ub_n sram_lb_n}]

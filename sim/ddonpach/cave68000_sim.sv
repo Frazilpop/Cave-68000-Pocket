@@ -209,11 +209,23 @@ module cave68000_sim (
     .ddr_rd (), .ddr_wr (fb_wr), .ddr_burstLength (fb_len), .beat (fb_beat)
   );
 
+  // The 68000's own RAM, which the Z80 build puts off the chip: here a block
+  // RAM, as it was inside Main (the Pocket's SRAM is cave68000_psim's).
+  wire        xram_rd, xram_wr;
+  wire [15:0] xram_addr, xram_din, xram_dout;
+  wire [1:0]  xram_mask;
+  single_port_ram #(.ADDR_WIDTH (16), .DATA_WIDTH (16), .MASK_ENABLE ("TRUE")) xram (
+    .clk (clk_cpu), .rd (xram_rd), .wr (xram_wr), .addr (xram_addr),
+    .mask (xram_mask), .din (xram_din), .dout (xram_dout)
+  );
+
   cave68000 dut (
     .clk (clk), .rst (rst), .clk_cpu (clk_cpu), .rst_cpu (rst_cpu),
     .clk_vid (clk_vid), .rst_vid (rst_vid),
     .rom_loaded (rom_loaded), .game (game),
     .dl_wr (dl_wr), .dl_addr (dl_addr), .dl_data (dl_data),
+    .xram_rd (xram_rd), .xram_wr (xram_wr), .xram_addr (xram_addr),
+    .xram_mask (xram_mask), .xram_din (xram_din), .xram_dout (xram_dout),
     .p1 (p1), .p2 (p2), .coin (coin), .start (start),
     .service (service), .pause (pause), .dsw (dsw),
     .prog_rd (prog_rd), .prog_addr (prog_a), .prog_dout (prog_dout),

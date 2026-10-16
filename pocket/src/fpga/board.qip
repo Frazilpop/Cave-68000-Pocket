@@ -18,7 +18,7 @@ foreach f {cave_sdram.sv kaneko_sdram.sv cave_line_port.sv cave_spr_port.sv
            cave_fb_rows.sv cave_eeprom_store.sv} {
     set_global_assignment -name SYSTEMVERILOG_FILE [file join $r mem $f]
 }
-foreach f {CaveAsyncMemArbiters.sv CaveBoardProfile.sv CaveBurstBuffers.sv CaveBurstDMAs.sv CaveBurstMemArbiters.sv CaveClockEnable.sv CaveCpuResetBridge.sv CaveCpuWrappers.sv CaveDataFreezers.sv CaveDualClockFIFO.sv CaveGameConfig.sv CaveLayerProcessor.sv CaveMainSupport.sv CavePageFlippers.sv CaveReadCache.sv CaveRegisterFiles.sv CaveRequestQueues.sv CaveSinglePortRam.sv CaveSpriteHelpers.sv CaveSyncQueue.sv CaveSyncReadMem.sv CaveTileRomClockCrossing.sv CaveTrueDualPortRam.sv CaveVideoTiming.sv ChannelController.sv ColorMixer.sv EEPROM.sv GPU.sv Main.sv Sound.sv SoundOki.sv SpriteBlitter.sv SpriteDecoder.sv SpriteFrameBuffer.sv SpriteProcessor.sv VideoSys.sv YMZ280B.sv} {
+foreach f {CaveAsyncMemArbiters.sv CaveBoardProfile.sv CaveBurstBuffers.sv CaveBurstDMAs.sv CaveBurstMemArbiters.sv CaveClockEnable.sv CaveCpuResetBridge.sv CaveCpuWrappers.sv CaveDataFreezers.sv CaveDualClockFIFO.sv CaveGameConfig.sv CaveLayerProcessor.sv CaveMainSupport.sv CavePageFlippers.sv CaveReadCache.sv CaveRegisterFiles.sv CaveRequestQueues.sv CaveSinglePortRam.sv CaveSpriteHelpers.sv CaveSyncQueue.sv CaveSyncReadMem.sv CaveTileRomClockCrossing.sv CaveTrueDualPortRam.sv CaveVideoTiming.sv ChannelController.sv ColorMixer.sv EEPROM.sv GPU.sv Main.sv Sound.sv SoundOki.sv SoundZ80.sv SpriteBlitter.sv SpriteDecoder.sv SpriteFrameBuffer.sv SpriteProcessor.sv VideoSys.sv YM2151.sv YMZ280B.sv} {
     set_global_assignment -name SYSTEMVERILOG_FILE [file join $r cave $f]
 }
 foreach f {CaveSaveStateBus.sv CaveSaveStateRamPort.sv CaveSaveStateRamWrappers.sv CaveSaveStateRegisterPort.sv CaveSaveStateWideRamPort.sv} {
@@ -26,6 +26,13 @@ foreach f {CaveSaveStateBus.sv CaveSaveStateRamPort.sv CaveSaveStateRamWrappers.
 }
 foreach f {single_port_ram.sv true_dual_port_ram.sv dual_clock_fifo.sv} {
     set_global_assignment -name SYSTEMVERILOG_FILE [file join $r arcadia $f]
+}
+
+# TV80, the Z80 of Air Gallet's and Sailor Moon's sound board (SoundZ80; only
+# the CAVE_Z80 revision instantiates it), kept in the repository with MAME's
+# power-on registers and a Z80's 11-T NMI.
+foreach f {tv80_core.v tv80_alu.v tv80_mcode.v tv80_reg.v} {
+    set_global_assignment -name VERILOG_FILE [file join $r tv80 $f]
 }
 
 # fx68k: hdl/ is ijor's synthesis code. Its microcode is read with

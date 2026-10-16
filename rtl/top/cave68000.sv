@@ -25,7 +25,9 @@
 //                         Z80 sound board (SoundZ80: a Z80, a YM2151 and two
 //                         OKI M6295s), the board playing those two alone
 //   93C46                 EEPROM, inside Main; its 64 x 16 store is a port
-//   palette, VRAMs, sprite RAM, work RAM   on chip, inside Main
+//   palette, VRAMs, sprite RAM, work RAM   on chip, inside Main; on the
+//                         Z80 build the work RAM and Sailor Moon's layer
+//                         scratchpads are a port (xram), for want of room
 //
 // Three clocks, as upstream: clk (96 MHz) for the memories, the sprite
 // processor and the frame buffer; clk_cpu (32 MHz) for the 68000 side and
@@ -50,6 +52,19 @@ module cave68000 (
   input  wire        dl_wr,
   input  wire [24:0] dl_addr,        // word address in the image
   input  wire [15:0] dl_data,
+
+  // The 68000's own RAM off the chip, on clk_cpu (CAVE_Z80; tied off
+  // otherwise): the work RAM at words 0000-7fff, Sailor Moon's layer
+  // scratchpads at 8000 + 2000 * layer. The address follows the 68000's
+  // on every clock; a write is the strobe's clock (xram_wr with its data and
+  // byte mask), and xram_dout is taken on the third clock after the read
+  // strobe (xram_rd), as a block RAM's q would be (Main says more).
+  output wire        xram_rd,
+  output wire        xram_wr,
+  output wire [15:0] xram_addr,
+  output wire [1:0]  xram_mask,
+  output wire [15:0] xram_din,
+  input  wire [15:0] xram_dout,
 
   input  wire [3:0]  game,           // CaveGameConfig's index: 0 feversos, 1 ddonpach, 3 esprade, 4 uopoko, 5 guwange, 6 gaia (2 donpachi, 9 agallet, 10 sailormn on their own bitstreams)
 
@@ -457,6 +472,12 @@ module cave68000 (
     .io_eeprom_dout                         (_main_io_eeprom_dout),
     .io_eeprom_wait_n                       (_main_io_eeprom_wait_n),
     .io_eeprom_valid                        (_main_io_eeprom_valid),
+    .io_xram_rd                             (xram_rd),
+    .io_xram_wr                             (xram_wr),
+    .io_xram_addr                           (xram_addr),
+    .io_xram_mask                           (xram_mask),
+    .io_xram_din                            (xram_din),
+    .io_xram_dout                           (xram_dout),
     .io_hs_config_download                  (1'b0),
     .io_hs_config_wr                        (1'b0),
     .io_hs_config_addr                      (27'd0),
