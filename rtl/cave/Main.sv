@@ -145,6 +145,7 @@ module Main(
   output         io_hs_dirty,
   output         io_hs_active,
   output         io_spriteFrameBufferSwap,
+  output         io_layer2TileBank,      // Sailor Moon's layer 2 bank (700000 bit 0)
   input          io_ss_hold,
   input          io_ss_capture_request,
   input          io_ss_restore_enable,
@@ -1052,6 +1053,223 @@ module Main(
   end
 `endif
 
+  // ---------------------------------------------- Air Gallet, Sailor Moon
+  // Cave 68000 for Analogue Pocket: Gazelle's two games (game ids 9 and 10),
+  // decoded apart from the lattice as Power Instinct 2 is above, from
+  // cave.cpp's sailormn_map:
+  //
+  //   000000-07ffff, 200000-3fffff  program and data ROM (the image's 4 MB)
+  //   100000-10ffff  work RAM        400000-40ffff  RAM, the palette at 408000
+  //   500000-50ffff  sprite RAM      110000, 410000, 510000, 908000  a RAM word
+  //   600000/600002  IN0, IN1        700000 (high byte)  EEPROM, bit 0 the tile bank
+  //   800000, 880000, 900000  the three 038s' 32 KB, their scratchpads real RAM
+  //   a00000, a80000, b00000  their control words
+  //   b80000-b8007f  the 013 (write), the IRQ cause at b80000-b80007 (read)
+  //   b8006c  the reply flag (bit 1: no reply)   b8006e  reply / command
+  //
+  // Air Gallet RAM-tests 400000-40ffff and each layer's whole window, so
+  // the 64 KB round the palette is the palette RAM itself (it is 64 KB; the
+  // colours are its 4000-5fff, read so by the mixer) and each scratchpad is
+  // RAM of its own. Unmapped reads are 0, as MAME's.
+  //
+  // Two things only MAME does are copied so the bus traces can be held to
+  // its: the 68000 (alone) is reset again 1 ms after the board
+  // (sailormn_startup), and a sound command holds the 68000 for 50 us
+  // (sound_cmd_w's spin_until_time, to let the Z80 answer). IRQ cause bit 2
+  // reads 0 for 2000 us from the vblank IRQ (agallet_vblank_irq).
+  wire        gameIsSailormn = (io_gameIndex == 4'd9) | (io_gameIndex == 4'd10);
+  wire        smRead  = gameIsSailormn & _cpu_io_as & _cpu_io_rw;
+  wire        smWrite = gameIsSailormn & _cpu_io_as & ~_cpu_io_rw;
+  wire        smProgRomSelect =
+    gameIsSailormn & _cpu_io_rw &
+    ((cpuByteAddr < 24'h080000) | (cpuByteAddr >= 24'h200000 & cpuByteAddr < 24'h400000));
+  wire        smProgRomValid = smProgRomSelect & _cpu_io_as & io_progRom_valid;
+  wire        smProgRomComplete =
+    smProgRomValid | (smProgRomSelect & _cpu_io_as & progRomResponsePendingReg);
+  wire        smWorkRamSelect   = gameIsSailormn & cpuByteAddr[23:16] == 8'h10;
+  wire        smPaletteSelect   = gameIsSailormn & cpuByteAddr[23:16] == 8'h40;
+  wire        smSpriteRamSelect = gameIsSailormn & cpuByteAddr[23:16] == 8'h50;
+  wire [3:0]  smWordSelect = {4{gameIsSailormn}} & {
+    cpuByteAddr == 24'h908000, cpuByteAddr == 24'h510000,
+    cpuByteAddr == 24'h410000, cpuByteAddr == 24'h110000};
+  wire        smInput0Select = gameIsSailormn & cpuByteAddr == 24'h600000;
+  wire        smInput1Select = gameIsSailormn & cpuByteAddr == 24'h600002;
+  wire        smEepromWrite  =
+    gameIsSailormn & cpuByteAddr == 24'h700000 & _cpu_io_uds & writeStrobe;
+  // the three layers' windows and the parts of each
+  wire [2:0]  smLayerSelect = {3{gameIsSailormn}} & {
+    cpuByteAddr[23:15] == 9'h120, cpuByteAddr[23:15] == 9'h110, cpuByteAddr[23:15] == 9'h100};
+  wire [14:0] smLayerOffset = cpuByteAddr[14:0];
+  wire        smInVram16   = smLayerOffset < 15'h1000;
+  wire        smInLine     = smLayerOffset >= 15'h1000 & smLayerOffset < 15'h1800;
+  wire        smInScratch  = smLayerOffset >= 15'h1800 & smLayerOffset < 15'h4000;
+  wire        smInVram8    = smLayerOffset >= 15'h4000;
+  wire [2:0]  smVram16Select  = smLayerSelect & {3{smInVram16}};
+  wire [2:0]  smLineSelect    = smLayerSelect & {3{smInLine}};
+  wire [2:0]  smScratchSelect = smLayerSelect & {3{smInScratch}};
+  wire [2:0]  smVram8Select   = smLayerSelect & {3{smInVram8}};
+  wire [12:0] smScratchAddr   = 13'(_cpu_io_addr[12:0] - 13'h0C00);
+  wire [2:0]  smLayerRegsSelect = {3{gameIsSailormn & cpuByteAddr[2:1] != 2'h3}} & {
+    cpuByteAddr[23:3] == 21'h160000, cpuByteAddr[23:3] == 21'h150000,
+    cpuByteAddr[23:3] == 21'h140000};
+  wire        smVideoRegsSelect = gameIsSailormn & cpuByteAddr[23:7] == 17'h17000;
+  wire        smSpriteRegsWrite = smVideoRegsSelect & cpuByteAddr[6:4] == 3'h0 & writeStrobe;
+  wire        smSpriteSwap      = smVideoRegsSelect & cpuByteAddr[6:0] == 7'h08 & writeStrobe;
+  wire        smIrqCauseSelect  = smVideoRegsSelect & cpuByteAddr[6:3] == 4'h0;
+  wire        smFlagsSelect     = smVideoRegsSelect & cpuByteAddr[6:0] == 7'h6C;
+  wire        smSoundSelect     = smVideoRegsSelect & cpuByteAddr[6:0] == 7'h6E;
+  wire        smVideoIrqClear   = smIrqCauseSelect & readStrobe & cpuByteAddr[2:0] == 3'h4;
+  wire        smUnknownIrqClear = smIrqCauseSelect & readStrobe & cpuByteAddr[2:0] == 3'h6;
+  wire        smSoundWrite      = smSoundSelect & writeStrobe;
+  wire        smSoundReplyRead  = smSoundSelect & readStrobe;
+
+  wire [15:0] smScratchDout [0:2];
+  reg  [15:0] smWord [0:3];
+  reg         smTileBank;
+  reg         smAgalletIrq;
+  reg  [15:0] smAgalletCount;
+  reg  [10:0] smStall;
+  reg         smStallDone;
+  reg  [15:0] smStartupCount;
+  reg  [4:0]  smStartupPulse;
+  wire        smSoundReplyPop;
+  wire [15:0] smSoundReplyData;
+
+  genvar smK;
+  generate
+    for (smK = 0; smK < 3; smK = smK + 1) begin : smScratch
+      CaveSinglePortRam #(
+        .ADDR_WIDTH  (13),
+        .DATA_WIDTH  (16),
+        .DEPTH       (5120),
+        .MASK_ENABLE (1)
+      ) ram (
+        .clock (clock),
+        .rd    (smScratchSelect[smK] & readStrobe),
+        .wr    (smScratchSelect[smK] & writeStrobe),
+        .addr  (smScratchAddr),
+        .mask  (mainRam_io_mask),
+        .din   (_cpu_io_dout),
+        .dout  (smScratchDout[smK])
+      );
+    end
+  endgenerate
+
+  CaveSoundReplyReadLatch smSoundReplyReadLatch (
+    .clock       (clock),
+    .reset       (reset),
+    .read_strobe (smSoundReplyRead),
+    .fifo_empty  (io_soundCtrl_reply_empty),
+    .fifo_data   (io_soundCtrl_reply),
+    .fifo_pop    (smSoundReplyPop),
+    .cpu_data    (smSoundReplyData)
+  );
+
+  wire [15:0] smIrqCauseData =
+    {13'h0, (cpuByteAddr[2:0] == 3'h0) & ~smAgalletIrq, ~unknownIrq, ~videoIrq};
+  wire [15:0] smReadData =
+    smWorkRamSelect   ? _mainRam_io_dout :
+    smPaletteSelect   ? _paletteRam_io_portA_dout :
+    smSpriteRamSelect ? _spriteRam_io_portA_dout :
+    smWordSelect[0]   ? smWord[0] :
+    smWordSelect[1]   ? smWord[1] :
+    smWordSelect[2]   ? smWord[2] :
+    smWordSelect[3]   ? smWord[3] :
+    smInput0Select    ? inputPort0 :
+    smInput1Select    ? inputPort1 :
+    smVram16Select[0] ? _vram16x16_0_io_portA_dout :
+    smLineSelect[0]   ? _lineRam_0_io_portA_dout :
+    smScratchSelect[0] ? smScratchDout[0] :
+    smVram8Select[0]  ? _vram8x8_0_io_portA_dout :
+    smVram16Select[1] ? _vram16x16_1_io_portA_dout :
+    smLineSelect[1]   ? _lineRam_1_io_portA_dout :
+    smScratchSelect[1] ? smScratchDout[1] :
+    smVram8Select[1]  ? _vram8x8_1_io_portA_dout :
+    smVram16Select[2] ? _vram16x16_2_io_portA_dout :
+    smLineSelect[2]   ? _lineRam_2_io_portA_dout :
+    smScratchSelect[2] ? smScratchDout[2] :
+    smVram8Select[2]  ? _vram8x8_2_io_portA_dout :
+    smLayerRegsSelect[0] ? _layerRegs_0_io_mem_dout :
+    smLayerRegsSelect[1] ? _layerRegs_1_io_mem_dout :
+    smLayerRegsSelect[2] ? _layerRegs_2_io_mem_dout :
+    smIrqCauseSelect  ? smIrqCauseData :
+    smFlagsSelect     ? {14'h0, io_soundCtrl_reply_empty, 1'b0} :
+    smSoundSelect     ? smSoundReplyData :
+    16'h0000;
+  // DTACK a clock after AS, as the lattice gives it; the program ROM when
+  // its word is back; a sound command 50 us after its strobe.
+  wire        smDtack =
+    smProgRomSelect ? smProgRomComplete :
+    (smSoundSelect & ~_cpu_io_rw) ? _cpu_io_as & smStallDone :
+    _cpu_io_as & gameIsSailormn;
+
+  always @(posedge clock) begin
+    if (reset | ~gameIsSailormn) begin
+      smWord[0] <= 16'h0000;
+      smWord[1] <= 16'h0000;
+      smWord[2] <= 16'h0000;
+      smWord[3] <= 16'h0000;
+      smTileBank <= 1'b0;
+      smAgalletIrq <= 1'b0;
+      smAgalletCount <= 16'd0;
+      smStall <= 11'd0;
+      smStallDone <= 1'b0;
+    end
+    else begin
+      if (writeStrobe) begin
+        if (smWordSelect[0]) smWord[0] <= pwrinst2ApplyMask(smWord[0], _cpu_io_dout, mainRam_io_mask);
+        if (smWordSelect[1]) smWord[1] <= pwrinst2ApplyMask(smWord[1], _cpu_io_dout, mainRam_io_mask);
+        if (smWordSelect[2]) smWord[2] <= pwrinst2ApplyMask(smWord[2], _cpu_io_dout, mainRam_io_mask);
+        if (smWordSelect[3]) smWord[3] <= pwrinst2ApplyMask(smWord[3], _cpu_io_dout, mainRam_io_mask);
+      end
+      if (smEepromWrite)
+        smTileBank <= _cpu_io_dout[8];
+      // 2000 us at 32 MHz from the vblank IRQ
+      if (videoVBlankRising) begin
+        smAgalletIrq <= 1'b1;
+        smAgalletCount <= 16'd63999;
+      end
+      else if (smAgalletCount != 16'd0)
+        smAgalletCount <= smAgalletCount - 16'd1;
+      else
+        smAgalletIrq <= 1'b0;
+      // 50 us at 32 MHz from a sound command's strobe, then DTACK until AS ends
+      if (smSoundWrite)
+        smStall <= 11'd1599;
+      else if (smStall != 11'd0)
+        smStall <= smStall - 11'd1;
+      if (~_cpu_io_as)
+        smStallDone <= 1'b0;
+      else if (smStall == 11'd1)
+        smStallDone <= 1'b1;
+    end
+  end
+
+  // The 68000 alone reset 1 ms after the board, between bus cycles (so no
+  // program read is left in flight), for a microsecond. The millisecond is
+  // the 68000's own: clocks it spent waiting on its memories (AS held past
+  // the five clocks of a zero-wait bus cycle), which MAME's 68000 never
+  // spends, are not counted, so the reset lands on MAME's instruction.
+  reg  [5:0]  smAsLen;
+  always @(posedge clock)
+    smAsLen <= ~_cpu_io_as ? 6'd0 : (smAsLen == 6'h3f) ? smAsLen : smAsLen + 6'd1;
+  wire        smCpuWaiting = _cpu_io_as & (smAsLen >= 6'd5);
+  always @(posedge clock) begin
+    if (reset | ~gameIsSailormn) begin
+      smStartupCount <= 16'd31999;
+      smStartupPulse <= 5'd0;
+    end
+    else if (smStartupCount != 16'd0) begin
+      if (~smCpuWaiting)
+        smStartupCount <= smStartupCount - 16'd1;
+    end
+    else if (smStartupPulse == 5'd0 & ~_cpu_io_as)
+      smStartupPulse <= 5'd1;
+    else if (smStartupPulse != 5'd0 & smStartupPulse != 5'd31)
+      smStartupPulse <= smStartupPulse + 5'd1;
+  end
+  wire        smCpuReset = smStartupPulse != 5'd0 & smStartupPulse != 5'd31;
+
   wire        cs_1 = cpuByteAddr > 24'h10FFFF & cpuByteAddr < 24'h200000;
   wire        cs_2 = cpuByteAddr < 24'h100000;
   wire        _GEN_0 = cs_2 & _cpu_io_rw & io_progRom_valid;
@@ -1448,53 +1666,65 @@ module Main(
   reg  [15:0] tmp_31;
   wire        cs_191 = cpuByteAddr > 24'h8FFFFF & cpuByteAddr < 24'h901000;
   wire        vram16x16_1_io_portA_rd =
-    gameIsPwrInst2 ? pwrinst2Layer1Vram16Select & readStrobe :
+    gameIsSailormn ? smVram16Select[1] & readStrobe
+      : gameIsPwrInst2 ? pwrinst2Layer1Vram16Select & readStrobe :
     gameIsHotdogStorm ? cs_191 & readStrobe : _GEN_169;
   wire        vram16x16_1_io_portA_wr =
-    gameIsPwrInst2 ? pwrinst2Layer1Vram16Select & writeStrobe :
+    gameIsSailormn ? smVram16Select[1] & writeStrobe
+      : gameIsPwrInst2 ? pwrinst2Layer1Vram16Select & writeStrobe :
     gameIsHotdogStorm ? cs_191 & writeStrobe : _GEN_170;
   wire        cs_192 = cpuByteAddr > 24'h900FFF & cpuByteAddr < 24'h901800;
   wire        lineRam_1_io_portA_rd =
-    gameIsPwrInst2 ? pwrinst2Layer1LineSelect & readStrobe :
+    gameIsSailormn ? smLineSelect[1] & readStrobe
+      : gameIsPwrInst2 ? pwrinst2Layer1LineSelect & readStrobe :
     gameIsHotdogStorm ? cs_192 & readStrobe : _GEN_171;
   wire        lineRam_1_io_portA_wr =
-    gameIsPwrInst2 ? pwrinst2Layer1LineSelect & writeStrobe :
+    gameIsSailormn ? smLineSelect[1] & writeStrobe
+      : gameIsPwrInst2 ? pwrinst2Layer1LineSelect & writeStrobe :
     gameIsHotdogStorm ? cs_192 & writeStrobe : _GEN_172;
   reg  [15:0] tmp_32;
   wire        cs_194 = cpuByteAddr > 24'h903FFF & cpuByteAddr < 24'h908000;
   wire        vram8x8_1_io_portA_rd =
-    gameIsPwrInst2 ? pwrinst2Layer1Vram8Select & readStrobe
+    gameIsSailormn ? smVram8Select[1] & readStrobe
+      : gameIsPwrInst2 ? pwrinst2Layer1Vram8Select & readStrobe
       : gameIsMazinger ? mazingerLayer1Vram8Read
       : gameIsHotdogStorm ? cs_194 & readStrobe : _GEN_173;
   wire        vram8x8_1_io_portA_wr =
-    gameIsPwrInst2 ? pwrinst2Layer1Vram8Select & writeStrobe
+    gameIsSailormn ? smVram8Select[1] & writeStrobe
+      : gameIsPwrInst2 ? pwrinst2Layer1Vram8Select & writeStrobe
       : gameIsMazinger ? mazingerLayer1Vram8Write
       : gameIsHotdogStorm ? cs_194 & writeStrobe : _GEN_174;
   reg  [15:0] tmp_33;
   wire        cs_196 = cpuByteAddr > 24'h97FFFF & cpuByteAddr < 24'h981000;
   wire        vram16x16_2_io_portA_rd =
+    gameIsSailormn ? smVram16Select[2] & readStrobe :
     gameIsPwrInst2 ? 1'b0 :
     gameIsHotdogStorm ? cs_196 & readStrobe : _GEN_175;
   wire        vram16x16_2_io_portA_wr =
+    gameIsSailormn ? smVram16Select[2] & writeStrobe :
     gameIsPwrInst2 ? 1'b0 :
     gameIsHotdogStorm ? cs_196 & writeStrobe : _GEN_176;
   wire        cs_197 = cpuByteAddr > 24'h980FFF & cpuByteAddr < 24'h981800;
   wire        lineRam_2_io_portA_rd =
+    gameIsSailormn ? smLineSelect[2] & readStrobe :
     gameIsPwrInst2 ? 1'b0 :
     gameIsHotdogStorm ? cs_197 & readStrobe : _GEN_177;
   wire        lineRam_2_io_portA_wr =
+    gameIsSailormn ? smLineSelect[2] & writeStrobe :
     gameIsPwrInst2 ? 1'b0 :
     gameIsHotdogStorm ? cs_197 & writeStrobe : _GEN_178;
   reg  [15:0] tmp_34;
   wire        cs_199 = cpuByteAddr > 24'h983FFF & cpuByteAddr < 24'h988000;
   wire        vram8x8_2_io_portA_rd =
-    gameIsPwrInst2 ? pwrinst2Layer3Vram8Select & readStrobe
+    gameIsSailormn ? smVram8Select[2] & readStrobe
+      : gameIsPwrInst2 ? pwrinst2Layer3Vram8Select & readStrobe
       : gameIsHotdogStorm ? cs_199 & readStrobe : _GEN_179;
   wire        vram8x8_2_io_portA_wr =
-    gameIsPwrInst2 ? pwrinst2Layer3Vram8Select & writeStrobe
+    gameIsSailormn ? smVram8Select[2] & writeStrobe
+      : gameIsPwrInst2 ? pwrinst2Layer3Vram8Select & writeStrobe
       : gameIsHotdogStorm ? cs_199 & writeStrobe : _GEN_180;
   wire [12:0] vram8x8_2_io_portA_addr =
-    gameIsPwrInst2 ? _cpu_io_addr[12:0] :
+    gameIsPwrInst2 | gameIsSailormn ? _cpu_io_addr[12:0] :
     gameIsHotdogStorm | gameIsGuwange | gameIsGaia | gameIsEsprade
       ? _cpu_io_addr[12:0]
       : _GEN_66;
@@ -1509,12 +1739,14 @@ module Main(
   wire        _GEN_205 = gameIsHotdogStorm ? cs_206 & writeStrobe : _GEN_183;
   wire        cs_207 = cpuByteAddr > 24'hB7FFFF & cpuByteAddr < 24'hB80006;
   wire        layerRegs_1_io_mem_wr =
-    gameIsPwrInst2 ? pwrinst2Layer1RegsSelect & writeStrobe
+    gameIsSailormn ? smLayerRegsSelect[1] & writeStrobe
+      : gameIsPwrInst2 ? pwrinst2Layer1RegsSelect & writeStrobe
       : gameIsMazinger ? mazingerLayer1RegsWrite
       : gameIsHotdogStorm ? cs_207 & writeStrobe : _GEN_184;
   wire        cs_208 = cpuByteAddr > 24'hBFFFFF & cpuByteAddr < 24'hC00006;
   wire        layerRegs_2_io_mem_wr =
-    gameIsPwrInst2 ? pwrinst2Layer3RegsSelect & writeStrobe
+    gameIsSailormn ? smLayerRegsSelect[2] & writeStrobe
+      : gameIsPwrInst2 ? pwrinst2Layer3RegsSelect & writeStrobe
       : gameIsHotdogStorm ? cs_208 & writeStrobe : _GEN_185;
   wire        cs_213 = cpuByteAddr > 24'hEFFFFF & cpuByteAddr < 24'hF10000;
   wire        _GEN_206 = gameIsHotdogStorm ? cs_213 & readStrobe : _GEN_161;
@@ -1522,37 +1754,47 @@ module Main(
   wire        cs_214 = cpuByteAddr < 24'h100000;
   wire        cs_215 = (|(_cpu_io_addr[22:19])) & cpuByteAddr < 24'h110000;
   wire        mainRam_io_rd =
-    gameIsPwrInst2 ? pwrinst2MainRamSelect & readStrobe
+    gameIsSailormn ? smWorkRamSelect & readStrobe
+      : gameIsPwrInst2 ? pwrinst2MainRamSelect & readStrobe
       : gameIsMazinger ? mazingerMainRamRead
       : gameIsUopoko ? cs_215 & readStrobe : _GEN_190;
   wire        mainRam_io_wr =
-    gameIsPwrInst2 ? pwrinst2MainRamSelect & writeStrobe
+    gameIsSailormn ? smWorkRamSelect & writeStrobe
+      : gameIsPwrInst2 ? pwrinst2MainRamSelect & writeStrobe
       : gameIsMazinger ? mazingerMainRamWrite
       : gameIsUopoko ? cs_215 & writeStrobe : _GEN_191;
   wire        cs_216 = cpuByteAddr > 24'h2FFFFF & cpuByteAddr < 24'h300004;
   wire        cs_217 = (|(_cpu_io_addr[22:21])) & cpuByteAddr < 24'h410000;
   wire        spriteRam_io_portA_rd =
-    gameIsPwrInst2 ? pwrinst2SpriteListRamSelect & readStrobe
+    gameIsSailormn ? smSpriteRamSelect & readStrobe
+      : gameIsPwrInst2 ? pwrinst2SpriteListRamSelect & readStrobe
       : gameIsMazinger ? mazingerSpriteRamRead
       : gameIsUopoko ? cs_217 & readStrobe : _GEN_206;
   wire        spriteRam_io_portA_wr =
-    gameIsPwrInst2 ? pwrinst2SpriteListRamSelect & writeStrobe
+    gameIsSailormn ? smSpriteRamSelect & writeStrobe
+      : gameIsPwrInst2 ? pwrinst2SpriteListRamSelect & writeStrobe
       : gameIsMazinger ? mazingerSpriteRamWrite
       : gameIsUopoko ? cs_217 & writeStrobe : _GEN_207;
   wire        cs_218 = cpuByteAddr > 24'h4FFFFF & cpuByteAddr < 24'h501000;
-  wire        vram16x16_0_io_portA_rd = gameIsPwrInst2 ? pwrinst2Layer0Vram16Select & readStrobe : gameIsUopoko ? cs_218 & readStrobe : _GEN_195;
-  wire        vram16x16_0_io_portA_wr = gameIsPwrInst2 ? pwrinst2Layer0Vram16Select & writeStrobe : gameIsUopoko ? cs_218 & writeStrobe : _GEN_196;
+  wire        vram16x16_0_io_portA_rd = gameIsSailormn ? smVram16Select[0] & readStrobe
+      : gameIsPwrInst2 ? pwrinst2Layer0Vram16Select & readStrobe : gameIsUopoko ? cs_218 & readStrobe : _GEN_195;
+  wire        vram16x16_0_io_portA_wr = gameIsSailormn ? smVram16Select[0] & writeStrobe
+      : gameIsPwrInst2 ? pwrinst2Layer0Vram16Select & writeStrobe : gameIsUopoko ? cs_218 & writeStrobe : _GEN_196;
   wire        cs_219 = cpuByteAddr > 24'h500FFF & cpuByteAddr < 24'h501800;
-  wire        lineRam_0_io_portA_rd = gameIsPwrInst2 ? pwrinst2Layer0LineSelect & readStrobe : gameIsUopoko ? cs_219 & readStrobe : _GEN_197;
-  wire        lineRam_0_io_portA_wr = gameIsPwrInst2 ? pwrinst2Layer0LineSelect & writeStrobe : gameIsUopoko ? cs_219 & writeStrobe : _GEN_198;
+  wire        lineRam_0_io_portA_rd = gameIsSailormn ? smLineSelect[0] & readStrobe
+      : gameIsPwrInst2 ? pwrinst2Layer0LineSelect & readStrobe : gameIsUopoko ? cs_219 & readStrobe : _GEN_197;
+  wire        lineRam_0_io_portA_wr = gameIsSailormn ? smLineSelect[0] & writeStrobe
+      : gameIsPwrInst2 ? pwrinst2Layer0LineSelect & writeStrobe : gameIsUopoko ? cs_219 & writeStrobe : _GEN_198;
   reg  [15:0] tmp_36;
   wire        cs_221 = cpuByteAddr > 24'h503FFF & cpuByteAddr < 24'h508000;
   wire        vram8x8_0_io_portA_rd =
-    gameIsPwrInst2 ? pwrinst2Layer0Vram8Select & readStrobe
+    gameIsSailormn ? smVram8Select[0] & readStrobe
+      : gameIsPwrInst2 ? pwrinst2Layer0Vram8Select & readStrobe
       : gameIsMazinger ? mazingerLayer0Vram8Read
       : gameIsUopoko ? cs_221 & readStrobe : _GEN_199;
   wire        vram8x8_0_io_portA_wr =
-    gameIsPwrInst2 ? pwrinst2Layer0Vram8Select & writeStrobe
+    gameIsSailormn ? smVram8Select[0] & writeStrobe
+      : gameIsPwrInst2 ? pwrinst2Layer0Vram8Select & writeStrobe
       : gameIsMazinger ? mazingerLayer0Vram8Write
       : gameIsUopoko ? cs_221 & writeStrobe : _GEN_200;
   reg  [15:0] tmp_37;
@@ -1617,7 +1859,8 @@ module Main(
 
   wire        cs_224 = cpuByteAddr > 24'h5FFFFF & cpuByteAddr < 24'h600010;
   wire        spriteRegs_io_mem_wr =
-    gameIsPwrInst2 ? pwrinst2SpriteRegsWrite
+    gameIsSailormn ? smSpriteRegsWrite
+      : gameIsPwrInst2 ? pwrinst2SpriteRegsWrite
       : gameIsMazinger ? mazingerSpriteRegsWrite
       : gameIsUopoko ? mem_7_wr : _GEN_201;
   wire [2:0]  spriteRegs_io_mem_addr =
@@ -1629,20 +1872,23 @@ module Main(
   wire        _GEN_209 = cpuByteAddr > 24'h600007 & cpuByteAddr < 24'h600009 & writeStrobe;
   wire        cs_227 = cpuByteAddr > 24'h6FFFFF & cpuByteAddr < 24'h700006;
   wire        layerRegs_0_io_mem_wr =
-    gameIsPwrInst2 ? pwrinst2Layer0RegsSelect & writeStrobe
+    gameIsSailormn ? smLayerRegsSelect[0] & writeStrobe
+      : gameIsPwrInst2 ? pwrinst2Layer0RegsSelect & writeStrobe
       : gameIsMazinger ? mazingerLayer0RegsWrite
       : gameIsUopoko ? cs_227 & writeStrobe : _GEN_205;
   wire        cs_228 = _cpu_io_addr[22] & cpuByteAddr < 24'h810000;
   wire        paletteRam_io_portA_rd =
-    gameIsPwrInst2 ? pwrinst2PaletteSelect & readStrobe
+    gameIsSailormn ? smPaletteSelect & readStrobe
+      : gameIsPwrInst2 ? pwrinst2PaletteSelect & readStrobe
       : gameIsMazinger ? mazingerPaletteRead
       : gameIsUopoko ? cs_228 & readStrobe : _GEN_192;
   wire        paletteRam_io_portA_wr =
-    gameIsPwrInst2 ? pwrinst2PaletteSelect & writeStrobe
+    gameIsSailormn ? smPaletteSelect & writeStrobe
+      : gameIsPwrInst2 ? pwrinst2PaletteSelect & writeStrobe
       : gameIsMazinger ? mazingerPaletteWrite
       : gameIsUopoko ? cs_228 & writeStrobe : _GEN_193;
   wire [14:0] paletteRam_io_portA_addr =
-    gameIsPwrInst2 ? _cpu_io_addr[14:0]
+    gameIsPwrInst2 | gameIsSailormn ? _cpu_io_addr[14:0]
       : gameIsMazinger ? mazingerPaletteRamAddr
       : gameIsUopoko ? _cpu_io_addr[14:0] : _GEN_194;
   wire        _GEN_210 = videoVBlankRising | videoIrq;
@@ -1881,7 +2127,8 @@ module Main(
   wire        _GEN_418 = cs_212 & readStrobe;
   wire        _GEN_419 = cs_214 & _cpu_io_rw & io_progRom_valid;
   wire        progRomResponseValid =
-    gameIsPwrInst2 ? pwrinst2ProgRomValid
+    gameIsSailormn ? smProgRomValid
+      : gameIsPwrInst2 ? pwrinst2ProgRomValid
       : gameIsUopoko ? _GEN_419
       : gameIsHotdogStorm ? _GEN_409
       : gameIsGuwange ? _GEN_381
@@ -1907,7 +2154,8 @@ module Main(
   wire        _GEN_429 = gameIsGuwange ? cs_179 & writeStrobe : _GEN_428;
   wire        _GEN_430 = gameIsHotdogStorm ? cs_211 & writeStrobe : _GEN_429;
   assign eepromMem_wr =
-    gameIsPwrInst2 ? pwrinst2EepromWrite
+    gameIsSailormn ? smEepromWrite
+      : gameIsPwrInst2 ? pwrinst2EepromWrite
       : gameIsMazinger ? mazingerEepromWrite
       : gameIsUopoko ? cs_231 & writeStrobe : _GEN_430;
   wire        cs_120 = cpuByteAddr > 24'h5017FF & cpuByteAddr < 24'h504000;
@@ -2196,19 +2444,27 @@ module Main(
         progRomResponsePendingReg <= 1'b0;
 
       videoIrq <=
-        gameIsPwrInst2
+        gameIsSailormn
+          ? (videoIrq | videoVBlankRising) & ~smVideoIrqClear
+        : gameIsPwrInst2
           ? (videoIrq | videoVBlankRising) & ~pwrinst2VideoIrqClear
         : gameIsMazinger
           ? videoVBlankRising | (videoIrq & ~mazingerVideoIrqClear)
           : _GEN_421 ? ~(_offset_T_222 == 24'h4 | _GEN_412) & _GEN_385 : ~_GEN_412 & _GEN_385;
       agalletIrq <= videoVBlankRising | (~videoVBlankFalling & agalletIrq);
       unknownIrq <=
-        gameIsPwrInst2
+        gameIsSailormn
+          ? unknownIrq & ~smUnknownIrqClear
+        : gameIsPwrInst2
           ? unknownIrq & ~pwrinst2UnknownIrqClear
         : gameIsMazinger
           ? (unknownIrq | videoVBlankRising) & ~mazingerUnknownIrqClear
           : _GEN_421 ? ~(_offset_T_222 == 24'h6 | _GEN_413) & _GEN_386 : ~_GEN_413 & _GEN_386;
-      if (gameIsPwrInst2) begin
+      if (gameIsSailormn) begin
+        if (smRead & ~smProgRomSelect)
+          dinReg <= smReadData;
+      end
+      else if (gameIsPwrInst2) begin
         if (pwrinst2Dtack && !pwrinst2ProgRomRead)
           dinReg <= pwrinst2ReadData;
       end
@@ -4310,7 +4566,9 @@ module Main(
       else if (_GEN_218)
         dinReg <= 16'h0;
       dtackReg <=
-        gameIsPwrInst2
+        gameIsSailormn
+          ? smDtack
+        : gameIsPwrInst2
           ? pwrinst2Dtack
         : gameIsMazinger
           ? mazingerDtack
@@ -4482,7 +4740,7 @@ module Main(
     progRomResponsePendingReg ? progRomResponseDataReg : dinReg;
   CaveMain68kCpu cpu (
     .clock                      (clock),
-    .reset                      (reset),
+    .reset                      (reset | smCpuReset),
     .io_halt                    (pauseActive),
     .io_ss_hold                 (io_ss_hold | highScoreCpuHold),
     .io_ss_capture_request      (io_ss_capture_request),
@@ -5010,7 +5268,9 @@ module Main(
     .dout_a  (_paletteRam_io_portA_dout),
     .clock_b (io_videoClock),
     .rd_b    (1'b1),
-    .addr_b  (io_gpuMem_paletteRam_addr),
+    // Air Gallet and Sailor Moon: the colours are at 408000, 4000 words in
+    .addr_b  (gameIsSailormn ? {2'b10, io_gpuMem_paletteRam_addr[12:0]}
+                             : io_gpuMem_paletteRam_addr),
     .dout_b  (io_gpuMem_paletteRam_dout),
     .blocked_access (),
     .ssbus   (mainSaveStateOwners[3])
@@ -5185,23 +5445,28 @@ module Main(
   assign io_soundCtrl_ymz_wr = gameIsUopoko ? cs_216 & writeStrobe : _GEN_182;
   assign io_soundCtrl_ymz_addr = _cpu_io_addr;
   assign io_soundCtrl_ymz_din = _cpu_io_dout;
-  assign io_soundCtrl_req = pwrinst2SoundWrite;
+  assign io_soundCtrl_req = gameIsSailormn ? smSoundWrite : pwrinst2SoundWrite;
   assign io_soundCtrl_data = _cpu_io_dout;
-  assign io_soundCtrl_reply_rd = pwrinst2SoundReplyPop;
+  assign io_soundCtrl_reply_rd = gameIsSailormn ? smSoundReplyPop : pwrinst2SoundReplyPop;
+  assign io_layer2TileBank = smTileBank;
   // the 68000's address strobe, for the Pocket shell's count of its waits
   assign io_cpu_as = _cpu_io_as;
   assign io_progRom_rd =
-    gameIsPwrInst2 ? pwrinst2ProgRomRead
+    gameIsSailormn ? smProgRomSelect & readStrobe
+      : gameIsPwrInst2 ? pwrinst2ProgRomRead
       : gameIsMazinger ? mazingerProgRomRead
       : gameIsUopoko ? cs_214 & readStrobe : _GEN_189;
   assign io_progRom_addr =
-    gameIsPwrInst2
+    gameIsSailormn
+      ? cpuByteAddr[21:0]
+      : gameIsPwrInst2
       ? {pwrinst2ExtraRomRead, _cpu_io_addr[19:0], 1'b0}
       : (gameIsMazinger & mazingerExtraRomSelect)
         ? {2'b01, cpuByteAddr[18:0]}
         : {2'b00, _cpu_io_addr[18:0], 1'b0};
   assign io_spriteFrameBufferSwap =
-    gameIsPwrInst2 ? videoVBlankRising
+    gameIsSailormn ? smSpriteSwap | vblankForcedSpriteSwap
+      : gameIsPwrInst2 ? videoVBlankRising
       : gameIsMazinger ? videoVBlankRising
       : gameIsUopoko ? _GEN_209 | _GEN_203 | _GEN_160 : _GEN_203 | _GEN_160;
 

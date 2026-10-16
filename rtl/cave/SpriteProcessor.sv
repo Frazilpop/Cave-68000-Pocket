@@ -8,6 +8,7 @@ module SpriteProcessor(
   input          io_ctrl_enable,
   input  [1:0]   io_ctrl_format,
   input          io_ctrl_pwrinst2,
+  input          io_ctrl_shiftX,     // the sprites a pixel left (Air Gallet, Sailor Moon)
   input          io_ctrl_start,
   input          io_ctrl_zoom,
   input  [1:0]   io_ctrl_regs_bank,
@@ -405,8 +406,10 @@ module SpriteProcessor(
     if (stateReg == STATE_READY & ~readyArmed) begin
       spriteFarX <= 28'(spriteZoomedWidth - {12'h0, spriteReg_zoom_x});
       spriteFarY <= 28'(spriteZoomedHeight - {12'h0, spriteReg_zoom_y});
-      spriteOffsetX <= zoomOffset(spriteWidth, spriteReg_zoom_x, spriteZoomedWidth,
-                                  spriteReg_hFlip, io_ctrl_regs_fixed);
+      // a pixel to the left with the picture on Air Gallet and Sailor Moon
+      spriteOffsetX <= 18'(zoomOffset(spriteWidth, spriteReg_zoom_x, spriteZoomedWidth,
+                                      spriteReg_hFlip, io_ctrl_regs_fixed)
+                           - {9'h0, io_ctrl_shiftX, 8'h00});
       spriteOffsetY <= zoomOffset(spriteHeight, spriteReg_zoom_y, spriteZoomedHeight,
                                   spriteReg_vFlip, io_ctrl_regs_fixed);
     end

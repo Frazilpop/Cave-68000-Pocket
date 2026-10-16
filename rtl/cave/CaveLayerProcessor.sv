@@ -21,6 +21,8 @@ module CaveLayerProcessor #(
   input  [1:0]  io_ctrl_format,
   input         io_ctrl_zero4bppPenF,
   input         io_ctrl_pwrinst2,
+  input         io_ctrl_tileBank,       // Sailor Moon's layer 2: 8 x 8 codes < 0x10000 + 0x40000
+  input         io_ctrl_rowEffectUp,    // Sailor Moon: the row effect a line up when flipped too
   input         io_ctrl_regs_tileSize,
   input         io_ctrl_regs_enable,
   input         io_ctrl_regs_flipX,
@@ -60,7 +62,7 @@ module CaveLayerProcessor #(
 
   reg [1:0]  tileReg_priority;
   reg [5:0]  tileReg_colorCode;
-  reg [17:0] tileReg_code;
+  reg [18:0] tileReg_code;
   reg [1:0]  priorityReg;
   reg [5:0]  colorReg;
   reg [7:0]  pixReg_0;
@@ -189,13 +191,13 @@ module CaveLayerProcessor #(
     tileRomAddr = 26'h0000000;
 
     if (io_ctrl_regs_tileSize & formatLinearTile)
-      tileRomAddr = {tileReg_code, tileOffset_y[3], ~tileOffset_x[3], tileOffset_y[2:0], 3'b000};
+      tileRomAddr = {tileReg_code[17:0], tileOffset_y[3], ~tileOffset_x[3], tileOffset_y[2:0], 3'b000};
     if (io_ctrl_regs_tileSize & format4bpp)
-      tileRomAddr = {1'b0, tileReg_code, tileOffset_y[3], ~tileOffset_x[3], tileOffset_y[2:1], 3'b000};
+      tileRomAddr = {1'b0, tileReg_code[17:0], tileOffset_y[3], ~tileOffset_x[3], tileOffset_y[2:1], 3'b000};
     if (~io_ctrl_regs_tileSize & formatLinearTile)
-      tileRomAddr = {2'b00, tileReg_code, tileOffset_y[2:0], 3'b000};
+      tileRomAddr = {1'b0, tileReg_code, tileOffset_y[2:0], 3'b000};
     if (~io_ctrl_regs_tileSize & format4bpp)
-      tileRomAddr = {3'b000, tileReg_code, tileOffset_y[2:1], 3'b000};
+      tileRomAddr = {2'b00, tileReg_code, tileOffset_y[2:1], 3'b000};
   end
 
   // The tile under column + 1 is in the tile RAM's output from the first
@@ -228,10 +230,13 @@ module CaveLayerProcessor #(
         io_ctrl_regs_tileSize ? io_ctrl_vram16x16_dout[15:14] : io_ctrl_vram8x8_dout[15:14];
       tileReg_colorCode <=
         io_ctrl_regs_tileSize ? io_ctrl_vram16x16_dout[13:8] : io_ctrl_vram8x8_dout[13:8];
+      // an 8 x 8 code is 18 bits; Sailor Moon's bank adds 0x40000 to one
+      // below 0x10000 (cave_v.cpp's sailormn_get_banked_code)
       tileReg_code <=
         io_ctrl_regs_tileSize
-          ? {2'b00, io_ctrl_vram16x16_dout[31:16]}
-          : {io_ctrl_vram8x8_dout[1:0], io_ctrl_vram8x8_dout[31:16]};
+          ? {3'b000, io_ctrl_vram16x16_dout[31:16]}
+          : {io_ctrl_tileBank & (io_ctrl_vram8x8_dout[1:0] == 2'b00),
+             io_ctrl_vram8x8_dout[1:0], io_ctrl_vram8x8_dout[31:16]};
 `ifdef CAVE_ENABLE_DEBUG_OVERLAY
       debugTileWordReg <=
         io_ctrl_regs_tileSize ? io_ctrl_vram16x16_dout : io_ctrl_vram8x8_dout;
@@ -279,7 +284,7 @@ module CaveLayerProcessor #(
 `ifdef CAVE_ENABLE_DEBUG_OVERLAY
       debugPixPriorityReg <= tileReg_priority;
       debugPixPaletteReg <= tileReg_colorCode;
-      debugPixCodeReg <= tileReg_code;
+      debugPixCodeReg <= tileReg_code[17:0];
       debugPixTileWordReg <= debugTileWordReg;
       debugPixRomAddrReg <= tileRomAddr;
       debugPixRawReg <= pixels4bppRaw;
@@ -315,7 +320,7 @@ module CaveLayerProcessor #(
   assign io_ctrl_vram8x8_addr = vramAddr;
   assign io_ctrl_vram16x16_addr = vramAddr[9:0];
   assign io_ctrl_lineRam_addr =
-    io_ctrl_regs_flipY ? (pos_y + 9'h001) : (pos_y - 9'h001);
+    io_ctrl_regs_flipY & ~io_ctrl_rowEffectUp ? (pos_y + 9'h001) : (pos_y - 9'h001);
   assign io_ctrl_tileRom_rd = layerEnable & ~io_video_vBlank;
   assign io_ctrl_tileRom_addr = {6'h00, tileRomAddr};
 

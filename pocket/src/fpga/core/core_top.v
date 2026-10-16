@@ -905,7 +905,7 @@ cave68000_mem #(.AW(SDR_AW)) u_board (
     .clk_cpu    (clk_cpu),  .rst_cpu (rst_cpu),
     .clk_vid    (clk_vid),  .rst_vid (rst_vid),
     .rom_loaded (board_loaded),
-    .game       (game),
+    .game       ({1'b0, game}),
 
     .p1         (in_p1),    .p2      (in_p2),
     .coin       (in_coin),  .start   (in_start),

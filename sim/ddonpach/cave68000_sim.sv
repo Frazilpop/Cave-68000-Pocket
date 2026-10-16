@@ -73,7 +73,7 @@ module cave68000_sim (
   input  wire        clk_cpu, rst_cpu,
   input  wire        clk_vid, rst_vid,
   input  wire        rom_loaded,
-  input  wire [2:0]  game,
+  input  wire [3:0]  game,
 
   input  wire [7:0]  p1, p2,
   input  wire [1:0]  coin, start,
@@ -143,9 +143,16 @@ module cave68000_sim (
   output wire        dbg_oki_sv0, dbg_oki_sv1,
   output wire [19:0] dbg_oki_s0, dbg_oki_s1
 );
+`ifdef CAVE_OKI
+  wire [3:0] gameIndex = 4'd2;
+`elsif CAVE_Z80
+  wire [3:0] gameIndex = (game == 4'd10) ? 4'd10 : 4'd9;
+`else
+  wire [3:0] gameIndex = (game[2:0] == 3'd7) ? 4'd1 : {1'b0, game[2:0]};
+`endif
   wire [31:0] off_snd, off_l0, off_l1, off_l2, off_spr;
   CaveGameConfig cfg (
-    .game_index (game == 3'd7 ? 4'd1 : {1'b0, game}),
+    .game_index (gameIndex),
     .granularity (), .eeprom_offset (eeprom_offset), .sound_0_device (),
     .sound_0_rom_offset (off_snd), .sound_1_rom_offset (), .sound_2_rom_offset (),
     .layer_0_format (), .layer_0_rom_offset (off_l0), .layer_0_palette_bank (),
@@ -250,6 +257,11 @@ module cave68000_sim (
   assign dbg_oki_sv1  = dut.sound.io_sample_valid_1;
   assign dbg_oki_s0   = dut.sound.io_sample_0;
   assign dbg_oki_s1   = dut.sound.io_sample_1;
+`elsif CAVE_Z80
+  // the Z80 sound board: nothing to tap yet
+  assign {dbg_ymz_busy, dbg_ymz_begin, dbg_ymz_apply} = '0;
+  assign {dbg_oki_wr0, dbg_oki_wr1, dbg_nmk_wr, dbg_oki_tick, dbg_oki_din, dbg_nmk_addr} = '0;
+  assign {dbg_oki_sv0, dbg_oki_sv1, dbg_oki_s0, dbg_oki_s1} = '0;
 `else
   assign dbg_ymz_busy = dut.sound.ymz280b.channelCtrl.state != 4'd0;
   // the next clk_cpu edge begins a sample (an access on it lands after the sample)

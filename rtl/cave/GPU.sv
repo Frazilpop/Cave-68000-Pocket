@@ -66,6 +66,11 @@ module GPU(
   output [31:0]  io_layerCtrl_2_tileRom_addr,
   input  [63:0]  io_layerCtrl_2_tileRom_dout,
   input          io_pwrinst2Layer2_enable,
+  // Air Gallet and Sailor Moon: the picture from x + 1 (MAME shows 1..320 of
+  // 321), the 7f0 background pen, layer 2's tile bank and Sailor Moon's
+  // flipped row effect (cave_v.cpp's kludge 1)
+  input          io_gameConfig_sailormn,
+  input          io_layer2TileBank,
   input          io_pwrinst2Layer2_regs_tileSize,
   input          io_pwrinst2Layer2_regs_enable,
   input          io_pwrinst2Layer2_regs_flipX,
@@ -176,7 +181,9 @@ module GPU(
 
   wire [8:0] flippedVideoX = io_video_regs_size_x - io_video_pos_x - 9'h001;
   wire [8:0] flippedVideoY = io_video_regs_size_y - io_video_pos_y - 9'h001;
-  wire [8:0] layerVideoPosX = io_spriteCtrl_pwrinst2 ? (io_video_pos_x + 9'h070) : io_video_pos_x;
+  wire [8:0] layerVideoPosX =
+    io_spriteCtrl_pwrinst2 ? (io_video_pos_x + 9'h070) :
+    io_gameConfig_sailormn ? (io_video_pos_x + 9'h001) : io_video_pos_x;
   wire [8:0] layer2VideoPosX =
     io_gameConfig_plegends ? (layerVideoPosX + 9'h001) : layerVideoPosX;
   wire [17:0] videoX = {9'h000, io_video_pos_x};
@@ -489,6 +496,7 @@ module GPU(
     .io_ctrl_enable              (io_spriteCtrl_enable),
     .io_ctrl_format              (io_spriteCtrl_format),
     .io_ctrl_pwrinst2            (io_spriteCtrl_pwrinst2),
+    .io_ctrl_shiftX              (io_gameConfig_sailormn),
     .io_ctrl_start               (io_spriteCtrl_start & ~io_ss_hold),
     .io_ctrl_zoom                (io_spriteCtrl_zoom),
     .io_ctrl_regs_bank           (io_spriteCtrl_regs_bank),
@@ -524,6 +532,8 @@ module GPU(
     .io_ctrl_format               (io_layerCtrl_0_format),
     .io_ctrl_zero4bppPenF         (1'b0),
     .io_ctrl_pwrinst2             (io_spriteCtrl_pwrinst2),
+    .io_ctrl_tileBank             (1'b0),
+    .io_ctrl_rowEffectUp          (io_gameConfig_sailormn),
     .io_ctrl_regs_tileSize        (io_layerCtrl_0_regs_tileSize),
     .io_ctrl_regs_enable          (io_layerCtrl_0_regs_enable),
     .io_ctrl_regs_flipX           (io_layerCtrl_0_regs_flipX),
@@ -568,6 +578,8 @@ module GPU(
     .io_ctrl_format               (io_layerCtrl_1_format),
     .io_ctrl_zero4bppPenF         (1'b0),
     .io_ctrl_pwrinst2             (io_spriteCtrl_pwrinst2),
+    .io_ctrl_tileBank             (1'b0),
+    .io_ctrl_rowEffectUp          (io_gameConfig_sailormn),
     .io_ctrl_regs_tileSize        (io_layerCtrl_1_regs_tileSize),
     .io_ctrl_regs_enable          (io_layerCtrl_1_regs_enable),
     .io_ctrl_regs_flipX           (io_layerCtrl_1_regs_flipX),
@@ -612,6 +624,8 @@ module GPU(
     .io_ctrl_format               (io_layerCtrl_2_format),
     .io_ctrl_zero4bppPenF         (io_spriteCtrl_pwrinst2),
     .io_ctrl_pwrinst2             (io_spriteCtrl_pwrinst2),
+    .io_ctrl_tileBank             (io_gameConfig_sailormn & io_layer2TileBank),
+    .io_ctrl_rowEffectUp          (io_gameConfig_sailormn),
     .io_ctrl_regs_tileSize        (io_layerCtrl_2_regs_tileSize),
     .io_ctrl_regs_enable          (io_layerCtrl_2_regs_enable),
     .io_ctrl_regs_flipX           (io_layerCtrl_2_regs_flipX),
@@ -656,6 +670,8 @@ module GPU(
     .io_ctrl_format               (2'h1),
     .io_ctrl_zero4bppPenF         (1'b0),
     .io_ctrl_pwrinst2             (io_spriteCtrl_pwrinst2),
+    .io_ctrl_tileBank             (1'b0),
+    .io_ctrl_rowEffectUp          (io_gameConfig_sailormn),
     .io_ctrl_regs_tileSize        (io_pwrinst2Layer2_regs_tileSize),
     .io_ctrl_regs_enable          (io_pwrinst2Layer2_regs_enable),
     .io_ctrl_regs_flipX           (io_pwrinst2Layer2_regs_flipX),
@@ -701,6 +717,7 @@ module GPU(
     .io_gameConfig_layer_2_format      (io_layerCtrl_2_format),
     .io_gameConfig_layer_2_paletteBank (io_gameConfig_layer_2_paletteBank),
     .io_gameConfig_pwrinst2            (io_spriteCtrl_pwrinst2),
+    .io_gameConfig_sailormn            (io_gameConfig_sailormn),
     .io_spritePen_priority             (spritePenPriority),
     .io_spritePen_palette              (spritePenPalette),
     .io_spritePen_color                (spritePenColor),

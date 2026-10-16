@@ -51,12 +51,19 @@ MAPS = {
                      vregs=0x800000, sprites=0x400000, palette=0x708000),
     "donpachi": dict(layers=[0x300000, 0x200000, 0x400000], lregs=[0x700000, 0x600000, 0x800000],
                      vregs=0x900000, sprites=0x500000, palette=0xA08000, prog=0x80000),
+    # sailormn_map; the EEPROM byte at 700000 carries layer 2's tile bank
+    "agallet": dict(layers=[0x800000, 0x880000, 0x900000], lregs=[0xA00000, 0xA80000, 0xB00000],
+                    vregs=0xB80000, sprites=0x500000, palette=0x408000, prog=0x80000,
+                    tilebank=0x700000),
 }
+MAPS["sailormn"] = MAPS["agallet"]
 PARENT = {"ddonpachj": "ddonpach", "espradej": "esprade", "espradejo": "esprade",
           "guwanges": "guwange", "uopokoj": "uopoko", "dfeveron": "feversos",
           "theroes": "gaia", "theroesa": "gaia",
           "donpachij": "donpachi", "donpachijs": "donpachi", "donpachikr": "donpachi",
           "donpachihk": "donpachi"}
+PARENT.update({s: "agallet" for s in (('agalletu', 'agalletj', 'agalletk', 'agallett', 'agalleth', 'agalleta', 'agalletau', 'agalletaj', 'agalletak', 'agalletat', 'agalletah'))})
+PARENT.update({s: "sailormn" for s in (('sailormne', 'sailormnu', 'sailormnk', 'sailormnt', 'sailormnh', 'sailormnnj', 'sailormnne', 'sailormnnu', 'sailormnnk', 'sailormnnt', 'sailormnnh', 'sailormnoj', 'sailormnoe', 'sailormnou', 'sailormnok', 'sailormnot', 'sailormnoh'))})
 
 ENTRY, LOADED_PC, TABLE, DATA = 0x000400, 0x000500, 0x001000, 0x002000
 PROG_SIZE = 0x100000                # the program region (donpachi: 0x80000, MAPS' prog)
@@ -180,6 +187,8 @@ def main():
     copies.append((m["sprites"], sprites))
     vregs[4] = (vregs[4] & ~3) | bank
     copies.append((m["vregs"], vregs))
+    if "tilebank" in m:                         # high byte, bit 0; the EEPROM's pins low
+        copies.append((m["tilebank"], [info.get("tile_bank", 0) << 8]))
 
     size = m.get("prog", PROG_SIZE)
     rom = bytearray(size)

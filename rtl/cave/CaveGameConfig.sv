@@ -7,7 +7,10 @@
 // Cave 68000 for Analogue Pocket: upstream's values but for DonPachi's, whose
 // image (tools/pocket/build_rom.py) holds MAME's whole 3 MB region for the
 // second OKI and the NMK112's fold of it, 4 MB at sound_1_rom_offset, where
-// upstream's MRA had 1 MB; its layers and sprites start 3 MB later.
+// upstream's MRA had 1 MB; its layers and sprites start 3 MB later. Air
+// Gallet (9) and Sailor Moon (10) are this port's own, as build_rom.py packs
+// them: the 4 MB program region, the EEPROM, the Z80's 512 KB, the two OKIs'
+// 2 MB each, then the layers (layer 2 in the 6bpp form) and the sprites.
 module CaveGameConfig (
   input      [3:0]  game_index,
   output reg [8:0]  granularity,
@@ -39,6 +42,8 @@ module CaveGameConfig (
   localparam [3:0] GAME_GAIA     = 4'h6;
   localparam [3:0] GAME_PWRINST2 = 4'h7;
   localparam [3:0] GAME_PLEGENDS = 4'h8;
+  localparam [3:0] GAME_AGALLET  = 4'h9;
+  localparam [3:0] GAME_SAILORMN = 4'hA;
 
   localparam [1:0] GFX_FORMAT_UNKNOWN  = 2'h0;
   localparam [1:0] GFX_FORMAT_4BPP     = 2'h1;
@@ -244,6 +249,27 @@ module CaveGameConfig (
         sprite_format        = GFX_FORMAT_4BPP_MSB;
         sprite_rom_offset    = 32'h011c_0080;
         sprite_zoom          = 1'b0;
+      end
+
+      GAME_AGALLET, GAME_SAILORMN: begin
+        granularity          = 9'h010;
+        eeprom_offset        = 32'h0040_0000;
+        sound_0_device       = SOUND_DEVICE_Z80;
+        sound_0_rom_offset   = 32'h0040_0080;
+        sound_1_rom_offset   = 32'h0048_0080;
+        sound_2_rom_offset   = 32'h0068_0080;
+        layer_0_format       = GFX_FORMAT_4BPP;
+        layer_0_rom_offset   = 32'h0088_0080;
+        layer_0_palette_bank = 2'h1;
+        layer_1_format       = GFX_FORMAT_4BPP;
+        layer_1_rom_offset   = (game_index == GAME_AGALLET) ? 32'h0098_0080 : 32'h00a8_0080;
+        layer_1_palette_bank = 2'h2;
+        layer_2_format       = GFX_FORMAT_6BPP;
+        layer_2_rom_offset   = (game_index == GAME_AGALLET) ? 32'h00b8_0080 : 32'h00c8_0080;
+        layer_2_palette_bank = 2'h3;
+        sprite_format        = GFX_FORMAT_4BPP;
+        sprite_rom_offset    = (game_index == GAME_AGALLET) ? 32'h00f8_0080 : 32'h0208_0080;
+        sprite_zoom          = 1'b1;
       end
 
       default: begin
