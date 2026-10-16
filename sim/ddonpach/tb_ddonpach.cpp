@@ -5,7 +5,7 @@
 //          [--rom-lat N] [--spr-lat N] [--fb-lat N] [--all-frames]
 //          [--trace file] [--trace-count N] [--trace-data-only]
 //          [--prog file --replay N] [--wav file] [--ymz-log file] [--ymz-trace file]
-//          [--oki-log file] [--oki-samples prefix]
+//          [--oki-log file] [--oki-samples prefix] [--z80-log file]
 //          [--press list]
 //
 // Hosts cave68000 (through sim/ddonpach/cave68000_sim.sv, which adds the
@@ -72,6 +72,16 @@
 // play the board's own run back; --oki-samples writes each chip's samples
 // as the board made them, PREFIX.0 and PREFIX.1, int32 as the model's --out.
 //
+// Built with CAVE_Z80 (sim/ddonpach/build.sh --z80), the board plays Air
+// Gallet's and Sailor Moon's Z80 sound board (rtl/cave/SoundZ80.sv), whose
+// ROM's first 16 KB the harness streams past the board before reset as the
+// loader would. --z80-log writes its Z80's accesses in
+// tools/mame_cave_z80.lua's format – the I/O ports (Z), the memory at
+// 4000-ffff (M), and the 68000's at b8006c-b8006f (C) – at the time each was
+// made from the sound board's reset (MAME's time 0), the Z80's less the
+// clocks it was behind its own time; --oki-samples then also writes
+// PREFIX_ym.raw, the YM2151's samples (int16 left and right, 62,500 Hz).
+//
 // --press holds inputs down over frame ranges, as tools/mame_cave_screens.lua's
 // PRESS does and by the same MAME field names: "400-405:Coin 1,600-605:1
 // Player Start". "Pause" (the harness's own, not MAME's) holds the board's
@@ -134,6 +144,7 @@ int main(int argc, char** argv) {
     const char* wav_path = nullptr;
     const char* oki_log_path = nullptr;
     const char* oki_samples_path = nullptr;
+    const char* z80_log_path = nullptr;
     const char* ymz_log_path = nullptr;
     const char* ymz_trace_path = nullptr;
     struct Press { int from, to, port, bit; };     // port 0 p1, 1 p2, 2 coin, 3 start, 4 service, 5 pause
@@ -181,6 +192,7 @@ int main(int argc, char** argv) {
         else if (!strcmp(argv[i], "--wav") && i + 1 < argc)         wav_path = argv[++i];
         else if (!strcmp(argv[i], "--oki-log") && i + 1 < argc)     oki_log_path = argv[++i];
         else if (!strcmp(argv[i], "--oki-samples") && i + 1 < argc) oki_samples_path = argv[++i];
+        else if (!strcmp(argv[i], "--z80-log") && i + 1 < argc)     z80_log_path = argv[++i];
         else if (!strcmp(argv[i], "--ymz-log") && i + 1 < argc)     ymz_log_path = argv[++i];
         else if (!strcmp(argv[i], "--ymz-trace") && i + 1 < argc)   ymz_trace_path = argv[++i];
         else if (!strcmp(argv[i], "--press") && i + 1 < argc) {
@@ -321,6 +333,16 @@ int main(int argc, char** argv) {
 #else
     t->prog_wait_n = 1; t->snd_wait_n = 1; t->tile_wait_n = 7;
     t->spr_wait_n = 1; t->fb_wait_n = 1; t->fbr_wait_n = 1; t->ee_wait_n = 1;
+    t->dl_wr = 0;
+#ifdef CAVE_Z80
+    // the sound CPU's first 16 KB past the board, as the loader streams them
+    // (build_rom.py's z80 region at 0x400080)
+    for (uint32_t w = 0x200040; w < 0x200040 + 8192; w++) {
+        t->dl_wr = 1; t->dl_addr = w; t->dl_data = rom16(2 * w);
+        half(0); half(1); cyc++;
+    }
+    t->dl_wr = 0;
+#endif
 #endif
 
     // power-on: reset held a while with the image in place
@@ -358,6 +380,10 @@ int main(int argc, char** argv) {
     FILE* ymz_trace = ymz_trace_path ? fopen(ymz_trace_path, "w") : nullptr;
     std::deque<std::string> ymz_queued;      // the writes in the chip's queue, as traced
     uint64_t clk_cpu_n = 0;
+    FILE* z80_log = z80_log_path ? fopen(z80_log_path, "w") : nullptr;
+    if (z80_log) fprintf(z80_log, "# the board, game %d\n", game);
+    uint64_t z80_base = 0;                  // the board's clock 0 (the 68000's, MAME's time 0)
+    std::vector<int16_t> ym_out;
 
     // ------------------------------------------------------------- monitors
     FILE* trace = trace_path ? fopen(trace_path, "w") : nullptr;
@@ -510,6 +536,10 @@ int main(int argc, char** argv) {
                 as_clk_f += (cyc - as_start) / 3;
             }
             if (!as && as_prev && have_rec) {
+                // (a command is logged on its strobe's clock, below)
+                if (z80_log && rec_a >= 0xb8006c && rec_a <= 0xb8006f && !(!rec_rd && rec_a == 0xb8006e))
+                    fprintf(z80_log, "%.12f C %c %06x %04x\n", (double)(clk_cpu_n + 1 - z80_base) / 32e6,
+                            rec_rd ? 'R' : 'W', rec_a, rec_d);
                 if (trace && !rec_iack && !(trace_data_only && rec_a >= 0x400 && rec_a < 0x100000)) {
                     fprintf(trace, "%06x %c %04x %04x\n", rec_a, rec_rd ? 'R' : 'W', rec_d, rec_m);
                     if (++traced >= trace_count && trace_count > 0) { fclose(trace); trace = nullptr; }
@@ -594,6 +624,26 @@ int main(int argc, char** argv) {
                 if (t->dbg_oki_sv0) oki_out[0].push_back(s20(t->dbg_oki_s0));
                 if (t->dbg_oki_sv1) oki_out[1].push_back(s20(t->dbg_oki_s1));
             }
+
+            // the Z80 sound board: this edge is clk_cpu_n (from 1); one with
+            // the board still in reset after it puts the board's clock 0
+            // (MAME's time 0, the 68000's) two edges on. Its own accesses
+            // carry the sound board's clock, which is MAME's time there.
+            if (t->dbg_z80_reset) z80_base = clk_cpu_n + 2;
+            // the command strobe after this edge is taken at the next: the
+            // write's time on the board's clock, as MAME's C W line has it
+            if (t->dbg_z80_cmd && z80_log)
+                fprintf(z80_log, "%.12f C W b8006e %04x\n", (double)(clk_cpu_n + 1 - z80_base) / 32e6,
+                        t->dbg_dout);
+            if (t->dbg_z80_acc && z80_log) {
+                unsigned a = t->dbg_z80_addr;
+                bool io = t->dbg_z80_io;
+                if (io || a >= 0x4000)
+                    fprintf(z80_log, "%.12f %c %c %0*x %02x\n", (double)t->dbg_z80_time / 32e6,
+                            io ? 'Z' : 'M', t->dbg_z80_wr ? 'W' : 'R', io ? 2 : 4, io ? a & 0xff : a,
+                            t->dbg_z80_data);
+            }
+            if (t->dbg_ym_sample) { ym_out.push_back((int16_t)t->dbg_ym_left); ym_out.push_back((int16_t)t->dbg_ym_right); }
         }
 
         // ---- video capture, at each clk_vid edge
@@ -702,6 +752,14 @@ int main(int argc, char** argv) {
     fclose(stats);
     if (ymz_log) fclose(ymz_log);
     if (oki_log) fclose(oki_log);
+    if (z80_log) fclose(z80_log);
+    if (oki_samples_path && !ym_out.empty()) {
+        std::string fn = std::string(oki_samples_path) + "_ym.raw";
+        FILE* f = fopen(fn.c_str(), "wb");
+        if (!f) { perror(fn.c_str()); return 1; }
+        fwrite(ym_out.data(), 2, ym_out.size(), f);
+        fclose(f);
+    }
     if (oki_samples_path)
         for (int c = 0; c < 2; c++) {
             std::string fn = std::string(oki_samples_path) + "." + std::to_string(c);

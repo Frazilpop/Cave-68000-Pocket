@@ -27,10 +27,12 @@ if [ "${1:-}" = "--oki" ]; then oki=1; shift; fi
 if [ "${1:-}" = "--z80" ]; then z80=1; shift; fi
 mkdir -p build/tmp
 export TMPDIR="$PWD/build/tmp"
+tv80=rtl/tv80
 common=(--cc --exe --build -j 0 -O3 --x-assign fast --x-initial 0
   -Wno-fatal -Wno-lint -Wno-style -Wno-MULTIDRIVEN -Wno-TIMESCALEMOD
   rtl/cave/savestate/*.sv rtl/cave/*.sv rtl/top/cave68000.sv
-  sim/models/arcadia_models.sv third_party/fx68k/hdl/verilator/*.sv)
+  sim/models/arcadia_models.sv third_party/fx68k/hdl/verilator/*.sv
+  $tv80/tv80_core.v $tv80/tv80_alu.v $tv80/tv80_mcode.v $tv80/tv80_reg.v)
 if [ "$oki" = 1 ]; then common+=(+define+CAVE_OKI -CFLAGS -DCAVE_OKI); fi
 if [ "$z80" = 1 ]; then common+=(+define+CAVE_Z80 -CFLAGS -DCAVE_Z80); fi
 if [ "$pocket" = 1 ]; then

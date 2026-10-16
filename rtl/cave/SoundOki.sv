@@ -43,10 +43,26 @@
 // 16-bit speaker, 0.8 and 0.5 of the sums (0.8 as 205 / 256), clamped; held,
 // and strobed at 88,200 Hz (2646 / 960,000 a clock) for the shell's
 // resampler, which takes the YMZ280B's rate.
+//
+// Air Gallet's and Sailor Moon's sound board (SoundZ80) has the same two
+// chips on 2.112 MHz, pin 7 high: both at 16,000 Hz, a sample every 2,000
+// clocks (RATE_NUM 1, RATE_DEN 2000, BOTH), and cave.cpp's oki_bank_w in place
+// of the NMK112 (PAGED): one bank register a chip, written at
+// io_nmk_addr {chip, 00}, its low nibble the 128 KB page of the chip's
+// 00000-1ffff (the phrase table with it), its high nibble that of
+// 20000-3ffff; the chips' regions at OKI0_BASE and OKI1_BASE on the port.
+// SoundZ80 mixes the chips' samples itself; io_audio is not used there.
 
 `default_nettype none
 
-module SoundOki (
+module SoundOki #(
+  parameter integer RATE_NUM = 999,      // OKI 1's samples: RATE_NUM / RATE_DEN a clock
+  parameter integer RATE_DEN = 2000000,
+  parameter integer BOTH = 0,            // OKI 0 on every one of them, not every other
+  parameter integer PAGED = 0,           // cave.cpp's oki_bank_w, not the NMK112
+  parameter [24:0]  OKI0_BASE = 25'h000000,
+  parameter [24:0]  OKI1_BASE = 25'h200000
+) (
   input  wire        clock,           // clk_cpu, 32 MHz
   input  wire        reset,
   input  wire        io_pause,        // the board paused: no sample begun
@@ -75,11 +91,11 @@ module SoundOki (
 );
 
   // ----------------------------------------------------------- the rates
-  reg  [20:0] rateAcc;                // OKI 1's samples: 999 / 2,000,000
-  reg         okiPhase;               // OKI 0 on every other one
-  wire [20:0] rateNext = rateAcc + 21'd999;
-  wire        tick1 = !io_pause && rateNext >= 21'd2000000;
-  wire        tick0 = tick1 && okiPhase;
+  reg  [20:0] rateAcc;                // OKI 1's samples: RATE_NUM / RATE_DEN
+  reg         okiPhase;               // OKI 0 on every other one (not BOTH)
+  wire [20:0] rateNext = rateAcc + RATE_NUM[20:0];
+  wire        tick1 = !io_pause && rateNext >= RATE_DEN[20:0];
+  wire        tick0 = tick1 && (BOTH != 0 || okiPhase);
 
   reg  [19:0] outAcc;                 // the output strobe: 2646 / 960,000
   wire [19:0] outNext = outAcc + 20'd2646;
@@ -155,8 +171,13 @@ module SoundOki (
   wire        inTable  = readAddr[17:10] == 8'h00;
   wire [7:0]  bankReg0 = bank[{1'b0, quarter}];
   wire [7:0]  bankReg1 = bank[{1'b1, inTable ? readAddr[9:8] : quarter}];
-  wire [24:0] mapped   = chip ? (25'h200000 + {3'd0, bankReg1[5:0], readAddr[15:0]})
-                              : {4'd0, bankReg0[4:0], readAddr[15:0]};
+  wire [24:0] nmkAddr  = chip ? (OKI1_BASE + {3'd0, bankReg1[5:0], readAddr[15:0]})
+                              : (OKI0_BASE + {4'd0, bankReg0[4:0], readAddr[15:0]});
+  // cave.cpp's oki_bank_w: a nibble a half of the chip's 256 KB
+  wire [7:0]  pageReg  = bank[{chip, 2'b00}];
+  wire [3:0]  page     = readAddr[17] ? pageReg[7:4] : pageReg[3:0];
+  wire [24:0] pagedAddr = (chip ? OKI1_BASE : OKI0_BASE) + {4'd0, page, readAddr[16:0]};
+  wire [24:0] mapped   = PAGED != 0 ? pagedAddr : nmkAddr;
 
   // the ADPCM step size, floor(16 * 1.1^step)
   function automatic [10:0] stepval(input [5:0] s);
@@ -237,7 +258,7 @@ module SoundOki (
     end else begin
       // ------------------------------------------------------ the rates
       if (!io_pause) begin
-        rateAcc <= tick1 ? rateNext - 21'd2000000 : rateNext;
+        rateAcc <= tick1 ? rateNext - RATE_DEN[20:0] : rateNext;
         if (tick1)
           okiPhase <= ~okiPhase;
       end

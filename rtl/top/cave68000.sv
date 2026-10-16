@@ -22,8 +22,8 @@
 //                         DonPachi's two OKI M6295s and NMK112 instead
 //                         (SoundOki), the board then playing DonPachi alone;
 //                         built with CAVE_Z80, Air Gallet's and Sailor Moon's
-//                         Z80 sound board (for now a stand-in that never
-//                         replies), the board playing those two alone
+//                         Z80 sound board (SoundZ80: a Z80, a YM2151 and two
+//                         OKI M6295s), the board playing those two alone
 //   93C46                 EEPROM, inside Main; its 64 x 16 store is a port
 //   palette, VRAMs, sprite RAM, work RAM   on chip, inside Main
 //
@@ -43,6 +43,14 @@ module cave68000 (
   input  wire        rst_vid,
 
   input  wire        rom_loaded,     // the memories hold the image; releases the 68000
+
+  // The loader's stream, on clk: the image's 16-bit words as they go to the
+  // SDRAM (the even byte in [7:0]); the Z80 build keeps the sound CPU's
+  // first 16 KB from it
+  input  wire        dl_wr,
+  input  wire [24:0] dl_addr,        // word address in the image
+  input  wire [15:0] dl_data,
+
   input  wire [3:0]  game,           // CaveGameConfig's index: 0 feversos, 1 ddonpach, 3 esprade, 4 uopoko, 5 guwange, 6 gaia (2 donpachi, 9 agallet, 10 sailormn on their own bitstreams)
 
   // Inputs
@@ -147,13 +155,14 @@ module cave68000 (
   wire [1:0]  gameConfig_layer_0_paletteBank, gameConfig_layer_1_paletteBank, gameConfig_layer_2_paletteBank;
   wire        gameConfig_sprite_zoom;
   wire        gameIsPwrInst2, gameIsPlegends, rotateClockwise;
+  wire [31:0] gameConfig_sound_0_rom_offset;
 
   CaveGameConfig gameConfig (
     .game_index           (gameIndex),
     .granularity          (gameConfig_granularity),
     .eeprom_offset        (),
     .sound_0_device       (gameConfig_sound_0_device),
-    .sound_0_rom_offset   (),
+    .sound_0_rom_offset   (gameConfig_sound_0_rom_offset),
     .sound_1_rom_offset   (),
     .sound_2_rom_offset   (),
     .layer_0_format       (layer_0_format),
@@ -213,6 +222,14 @@ module cave68000 (
   // ------------------------------------------------------------- the wires
   wire [15:0]  _main_io_soundCtrl_ymz_dout;
   wire         _main_io_soundCtrl_irq;
+  wire         _main_io_soundCtrl_req, _main_io_soundCtrl_reply_rd;
+  wire [15:0]  _main_io_soundCtrl_data;
+  wire [15:0]  _main_io_soundCtrl_reply;
+  wire         _main_io_soundCtrl_reply_empty;
+`ifndef CAVE_Z80
+  assign _main_io_soundCtrl_reply = 16'h00ff;
+  assign _main_io_soundCtrl_reply_empty = 1'b1;
+`endif
   wire         _main_io_soundCtrl_oki_0_wr, _main_io_soundCtrl_oki_1_wr, _main_io_soundCtrl_nmk_wr;
   wire [15:0]  _main_io_soundCtrl_oki_0_din, _main_io_soundCtrl_oki_1_din, _main_io_soundCtrl_nmk_din;
   wire [15:0]  _main_io_soundCtrl_oki_0_dout, _main_io_soundCtrl_oki_1_dout;
@@ -423,13 +440,11 @@ module cave68000 (
     .io_soundCtrl_ymz_addr                  (_main_io_soundCtrl_ymz_addr),
     .io_soundCtrl_ymz_din                   (_main_io_soundCtrl_ymz_din),
     .io_soundCtrl_ymz_dout                  (_main_io_soundCtrl_ymz_dout),
-    .io_soundCtrl_req                       (),
-    .io_soundCtrl_data                      (),
-    .io_soundCtrl_reply_rd                  (),
-    // the Z80 board's replies: none yet (MAME's traces of both games read
-    // the reply port twice in their first 260 frames, both times empty)
-    .io_soundCtrl_reply                     (16'h00ff),
-    .io_soundCtrl_reply_empty               (1'b1),
+    .io_soundCtrl_req                       (_main_io_soundCtrl_req),
+    .io_soundCtrl_data                      (_main_io_soundCtrl_data),
+    .io_soundCtrl_reply_rd                  (_main_io_soundCtrl_reply_rd),
+    .io_soundCtrl_reply                     (_main_io_soundCtrl_reply),
+    .io_soundCtrl_reply_empty               (_main_io_soundCtrl_reply_empty),
     .io_soundCtrl_irq                       (_main_io_soundCtrl_irq),
     .io_progRom_rd                          (_main_io_progRom_rd),
     .io_progRom_addr                        (_main_io_progRom_addr),
@@ -543,20 +558,43 @@ module cave68000 (
 
   // -------------------------------------------------------------- Sound
 `ifdef CAVE_Z80
-  // The Z80 sound board's stand-in: silent, no ROM reads
+  // The Z80 sound board. Its ROM's first 16 KB are kept on chip, taken from
+  // the loader's stream at the region's words (sound_0_rom_offset, the Z80's
+  // 512 KB; the OKIs' regions follow it, so one port base serves all three).
+  wire [24:0] sndLoadBase = gameConfig_sound_0_rom_offset[25:1];
+  wire [24:0] sndLoadWord = dl_addr - sndLoadBase;
+  wire        sndLoadWr   = dl_wr && dl_addr >= sndLoadBase && sndLoadWord < 25'd8192;
+  SoundZ80 sound (
+    .clock          (clk_cpu),
+    .reset          (cpuDomainReset),
+    .io_pause       (pause),
+    .io_load_clock  (clk),
+    .io_load_wr     (sndLoadWr),
+    .io_load_addr   (sndLoadWord[12:0]),
+    .io_load_data   (dl_data),
+    .io_cmd_wr      (_main_io_soundCtrl_req),
+    .io_cmd_data    (_main_io_soundCtrl_data),
+    .io_reply_rd    (_main_io_soundCtrl_reply_rd),
+    .io_reply       (_main_io_soundCtrl_reply),
+    .io_reply_empty (_main_io_soundCtrl_reply_empty),
+    .io_rom_rd      (_sound_io_rom_0_rd),
+    .io_rom_addr    (_sound_io_rom_0_addr),
+    .io_rom_dout    (_sound_io_rom_0_dout),
+    .io_rom_wait_n  (_sound_io_rom_0_wait_n),
+    .io_rom_valid   (_sound_io_rom_0_valid),
+    .io_audio       (snd),
+    .io_audio_valid (snd_sample),
+    .io_overrun     (snd_overrun),
+    .dbg_act        (), .dbg_acc (), .dbg_acc_io (), .dbg_acc_wr (), .dbg_acc_m1 (),
+    .dbg_acc_addr   (), .dbg_acc_data (), .dbg_acc_late (),
+    .dbg_ym_sample  (), .dbg_ym_left (), .dbg_ym_right (),
+    .dbg_oki_sv0    (), .dbg_oki_sv1 (), .dbg_oki_s0 (), .dbg_oki_s1 (),
+    .dbg_hold       ()
+  );
   assign _main_io_soundCtrl_oki_0_dout = 16'h0000;
   assign _main_io_soundCtrl_oki_1_dout = 16'h0000;
   assign _main_io_soundCtrl_ymz_dout = 16'h0000;
   assign _main_io_soundCtrl_irq = 1'b0;
-  assign _sound_io_rom_0_rd = 1'b0;
-  assign _sound_io_rom_0_addr = 25'd0;
-  assign snd = 16'd0;
-  reg [8:0] sndStrobeCount;
-  always @(posedge clk_cpu)
-    if (cpuDomainReset || sndStrobeCount == 9'd362) sndStrobeCount <= 9'd0;
-    else sndStrobeCount <= sndStrobeCount + 9'd1;
-  assign snd_sample = sndStrobeCount == 9'd362;
-  assign snd_overrun = 1'b0;
 `elsif CAVE_OKI
   wire [7:0] okiDout0, okiDout1;
   SoundOki sound (

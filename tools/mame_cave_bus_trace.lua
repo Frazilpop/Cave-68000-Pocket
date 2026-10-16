@@ -23,6 +23,8 @@
 --                        and 100000-ffffff (nothing else on this board sits
 --                        inside the 1 MB ROM window). Several times fewer Lua
 --                        callbacks.
+--   PRESS                inputs held over frame ranges, as tools/mame_cave_screens.lua
+--                        takes them ("400-405:Coin 1,600-605:1 Player Start")
 --
 -- FROM POWER-ON, NO SYNTHETIC RESET
 --
@@ -61,6 +63,16 @@ local cpu   = mach.devices[":maincpu"]
 local space = cpu.spaces["program"]
 local romname = emu.romname()
 
+local presses = {}
+for a, b, name in string.gmatch(os.getenv("PRESS") or "", "(%d+)-(%d+):([^,]+)") do
+  local field
+  for _, port in pairs(mach.ioport.ports) do
+    field = field or port.fields[name]
+  end
+  if not field then error("no input called " .. name) end
+  table.insert(presses, { from = tonumber(a), to = tonumber(b), name = name, field = field })
+end
+
 local fh = assert(io.open(OUT, "w"))
 local n, done, frames = 0, false, 0
 local t0 = os.clock()
@@ -93,6 +105,11 @@ end
 -- costing a Lua call per access after the limit.
 _G.cave_bt_frame = emu.add_machine_frame_notifier(function()
   frames = frames + 1
+  local down = {}
+  for _, p in ipairs(presses) do
+    down[p.name] = down[p.name] or (frames >= p.from and frames <= p.to)
+  end
+  for _, p in ipairs(presses) do p.field:set_value(down[p.name] and 1 or 0) end
   if not done then fh:write(fmt("# frame %d\n", frames)) end
   if done or frames >= FRAMES then
     for _, t in ipairs(_G.cave_taps) do t:remove() end
