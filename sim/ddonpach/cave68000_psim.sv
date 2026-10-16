@@ -26,7 +26,7 @@ module cave68000_psim #(
   input  wire        clk_cpu, rst_cpu,
   input  wire        clk_vid, rst_vid,
   input  wire        rom_loaded,
-  input  wire [2:0]  game,
+  input  wire [3:0]  game,
 
   input  wire [7:0]  p1, p2,
   input  wire [1:0]  coin, start,
@@ -201,6 +201,11 @@ module cave68000_psim #(
   assign dbg_oki_sv1  = mem.board.sound.io_sample_valid_1;
   assign dbg_oki_s0   = mem.board.sound.io_sample_0;
   assign dbg_oki_s1   = mem.board.sound.io_sample_1;
+`elsif CAVE_Z80
+  // the Z80 sound board: nothing to tap yet
+  assign {dbg_ymz_busy, dbg_ymz_begin, dbg_ymz_apply} = '0;
+  assign {dbg_oki_wr0, dbg_oki_wr1, dbg_nmk_wr, dbg_oki_tick, dbg_oki_din, dbg_nmk_addr} = '0;
+  assign {dbg_oki_sv0, dbg_oki_sv1, dbg_oki_s0, dbg_oki_s1} = '0;
 `else
   assign dbg_ymz_busy = mem.board.sound.ymz280b.channelCtrl.state != 4'd0;
   // the next clk_cpu edge begins a sample (an access on it lands after the sample)

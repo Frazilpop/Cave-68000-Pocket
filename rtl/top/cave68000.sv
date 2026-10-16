@@ -20,7 +20,10 @@
 //                         the frame buffer the platform keeps
 //   YMZ280B               Sound, on clk_cpu; built with CAVE_OKI defined,
 //                         DonPachi's two OKI M6295s and NMK112 instead
-//                         (SoundOki), the board then playing DonPachi alone
+//                         (SoundOki), the board then playing DonPachi alone;
+//                         built with CAVE_Z80, Air Gallet's and Sailor Moon's
+//                         Z80 sound board (for now a stand-in that never
+//                         replies), the board playing those two alone
 //   93C46                 EEPROM, inside Main; its 64 x 16 store is a port
 //   palette, VRAMs, sprite RAM, work RAM   on chip, inside Main
 //
@@ -40,7 +43,7 @@ module cave68000 (
   input  wire        rst_vid,
 
   input  wire        rom_loaded,     // the memories hold the image; releases the 68000
-  input  wire [2:0]  game,           // CaveGameConfig's index: 0 feversos, 1 ddonpach, 3 esprade, 4 uopoko, 5 guwange, 6 gaia
+  input  wire [3:0]  game,           // CaveGameConfig's index: 0 feversos, 1 ddonpach, 3 esprade, 4 uopoko, 5 guwange, 6 gaia (2 donpachi, 9 agallet, 10 sailormn on their own bitstreams)
 
   // Inputs
   input  wire [7:0]  p1, p2,         // {b4,b3,b2,b1,right,left,down,up} active high
@@ -126,13 +129,17 @@ module cave68000 (
   // ------------------------------------------------------------- the game
   // Upstream's index, held to the YMZ280B games: 7 is not a game, so the
   // Power Instinct 2 paths (indices 7 and 8) can never be selected and
-  // synthesis sweeps them. The OKI build plays DonPachi (2) alone, and
-  // sweeps the others.
+  // synthesis sweeps them, and the top bit is not looked at, so neither can
+  // Air Gallet's and Sailor Moon's (9 and 10). The OKI build plays DonPachi
+  // (2) alone and the Z80 build those two alone, and each sweeps the others.
 `ifdef CAVE_OKI
   wire [3:0] gameIndex = 4'd2;
+`elsif CAVE_Z80
+  wire [3:0] gameIndex = (game == 4'd10) ? 4'd10 : 4'd9;
 `else
-  wire [3:0] gameIndex = (game == 3'd7) ? 4'd1 : {1'b0, game};
+  wire [3:0] gameIndex = (game[2:0] == 3'd7) ? 4'd1 : {1'b0, game[2:0]};
 `endif
+  wire       gameIsSailormn = (gameIndex == 4'd9) | (gameIndex == 4'd10);
 
   wire [8:0]  gameConfig_granularity;
   wire [1:0]  gameConfig_sound_0_device;
@@ -250,6 +257,7 @@ module cave68000 (
   wire [6:0]   _main_io_eeprom_addr;
   wire [15:0]  _main_io_eeprom_din;
   wire         _main_io_spriteFrameBufferSwap;
+  wire         _main_io_layer2TileBank;
 
   wire [11:0]  _main_io_gpuMem_layer_0_vram8x8_addr, _main_io_gpuMem_layer_1_vram8x8_addr, _main_io_gpuMem_layer_2_vram8x8_addr, _main_io_gpuMem_pwrinst2_layer_2_vram8x8_addr;
   wire [9:0]   _main_io_gpuMem_layer_0_vram16x16_addr, _main_io_gpuMem_layer_1_vram16x16_addr, _main_io_gpuMem_layer_2_vram16x16_addr, _main_io_gpuMem_pwrinst2_layer_2_vram16x16_addr;
@@ -418,6 +426,8 @@ module cave68000 (
     .io_soundCtrl_req                       (),
     .io_soundCtrl_data                      (),
     .io_soundCtrl_reply_rd                  (),
+    // the Z80 board's replies: none yet (MAME's traces of both games read
+    // the reply port twice in their first 260 frames, both times empty)
     .io_soundCtrl_reply                     (16'h00ff),
     .io_soundCtrl_reply_empty               (1'b1),
     .io_soundCtrl_irq                       (_main_io_soundCtrl_irq),
@@ -447,6 +457,7 @@ module cave68000 (
     .io_hs_dirty                            (),
     .io_hs_active                           (),
     .io_spriteFrameBufferSwap               (_main_io_spriteFrameBufferSwap),
+    .io_layer2TileBank                      (_main_io_layer2TileBank),
     .io_ss_hold                             (1'b0),
     .io_ss_capture_request                  (1'b0),
     .io_ss_restore_enable                   (1'b0),
@@ -531,7 +542,22 @@ module cave68000 (
   );
 
   // -------------------------------------------------------------- Sound
-`ifdef CAVE_OKI
+`ifdef CAVE_Z80
+  // The Z80 sound board's stand-in: silent, no ROM reads
+  assign _main_io_soundCtrl_oki_0_dout = 16'h0000;
+  assign _main_io_soundCtrl_oki_1_dout = 16'h0000;
+  assign _main_io_soundCtrl_ymz_dout = 16'h0000;
+  assign _main_io_soundCtrl_irq = 1'b0;
+  assign _sound_io_rom_0_rd = 1'b0;
+  assign _sound_io_rom_0_addr = 25'd0;
+  assign snd = 16'd0;
+  reg [8:0] sndStrobeCount;
+  always @(posedge clk_cpu)
+    if (cpuDomainReset || sndStrobeCount == 9'd362) sndStrobeCount <= 9'd0;
+    else sndStrobeCount <= sndStrobeCount + 9'd1;
+  assign snd_sample = sndStrobeCount == 9'd362;
+  assign snd_overrun = 1'b0;
+`elsif CAVE_OKI
   wire [7:0] okiDout0, okiDout1;
   SoundOki sound (
     .clock                 (clk_cpu),
@@ -747,6 +773,8 @@ module cave68000 (
     .io_layerCtrl_2_tileRom_addr         (_gpu_io_layerCtrl_2_tileRom_addr),
     .io_layerCtrl_2_tileRom_dout         (_gpu_io_layerCtrl_2_tileRom_dout),
     .io_pwrinst2Layer2_enable            (1'b0),
+    .io_gameConfig_sailormn              (gameIsSailormn),
+    .io_layer2TileBank                   (_main_io_layer2TileBank),
     .io_pwrinst2Layer2_regs_tileSize     (_main_io_gpuMem_pwrinst2_layer_2_regs_tileSize),
     .io_pwrinst2Layer2_regs_enable       (_main_io_gpuMem_pwrinst2_layer_2_regs_enable),
     .io_pwrinst2Layer2_regs_flipX        (_main_io_gpuMem_pwrinst2_layer_2_regs_flipX),

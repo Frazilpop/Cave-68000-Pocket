@@ -156,6 +156,35 @@ DONPACHI_MAP = COMMON[:1] + [
     (0xc00002, 0xc00004, "IN1+eeprm c00002"),
     (0xd00000, 0xd00002, "eeprom w  d00000"),
 ]
+# Air Gallet and Sailor Moon (sailormn_map): the sprites at 500000, the
+# layers at 800000/880000/900000, a 2 MB data ROM at 200000, and the RAM round
+# the palette that Air Gallet tests
+SAILORMN_MAP = COMMON[:1] + [
+    (0x100000, 0x110000, "work ram  100000-10ffff"),
+    (0x110000, 0x110002, "ram word  110000"),
+    (0x200000, 0x400000, "data rom  200000-3fffff"),
+    (0x400000, 0x408000, "ram       400000-407fff"),
+    (0x408000, 0x40c000, "palette   408000-40bfff"),
+    (0x40c000, 0x410000, "ram       40c000-40ffff"),
+    (0x410000, 0x410002, "ram word  410000"),
+    (0x500000, 0x510000, "sprites   500000-50ffff"),
+    (0x510000, 0x510002, "ram word  510000"),
+    (0x600000, 0x600002, "IN0       600000"),
+    (0x600002, 0x600004, "IN1+eeprm 600002"),
+    (0x700000, 0x700002, "eeprom w  700000 (tile bank)"),
+    (0x800000, 0x808000, "layer0    800000-807fff"),
+    (0x880000, 0x888000, "layer1    880000-887fff"),
+    (0x900000, 0x908000, "layer2    900000-907fff"),
+    (0x908000, 0x908002, "ram word  908000"),
+    (0xa00000, 0xa00006, "layer0 r  a00000-a00005"),
+    (0xa80000, 0xa80006, "layer1 r  a80000-a80005"),
+    (0xb00000, 0xb00006, "layer2 r  b00000-b00005"),
+    (0xb80000, 0xb80008, "irq cause b80000-b80007"),
+    (0xb80008, 0xb8006c, "videoregs b80008-b8006b"),
+    (0xb8006c, 0xb8006e, "snd flags b8006c (videoregs w)"),
+    (0xb8006e, 0xb80070, "sound     b8006e (reply r, command w)"),
+    (0xb80070, 0xb80080, "videoregs b80070-b8007f"),
+]
 MAP_OF = {}
 for sets, m in ((("ddonpach", "ddonpachj"), DDONPACH_MAP),
                 (("esprade", "espradej", "espradejo"), ESPRADE_MAP),
@@ -163,7 +192,14 @@ for sets, m in ((("ddonpach", "ddonpachj"), DDONPACH_MAP),
                 (("feversos", "dfeveron"), DFEVERON_MAP),
                 (("uopoko", "uopokoj"), UOPOKO_MAP),
                 (("gaia", "theroes", "theroesa"), GAIA_MAP),
-                (("donpachi", "donpachij", "donpachijs", "donpachikr", "donpachihk"), DONPACHI_MAP)):
+                (("donpachi", "donpachij", "donpachijs", "donpachikr", "donpachihk"), DONPACHI_MAP),
+                (("agallet", "agalletu", "agalletj", "agalletk", "agallett", "agalleth",
+                  "agalleta", "agalletau", "agalletaj", "agalletak", "agalletat", "agalletah"),
+                 SAILORMN_MAP),
+                (("sailormn", "sailormne", "sailormnu", "sailormnk", "sailormnt", "sailormnh",
+                  "sailormnnj", "sailormnne", "sailormnnu", "sailormnnk", "sailormnnt", "sailormnnh",
+                  "sailormnoj", "sailormnoe", "sailormnou", "sailormnok", "sailormnot", "sailormnoh"),
+                 SAILORMN_MAP)):
     MAP_OF.update({s: m for s in sets})
 
 

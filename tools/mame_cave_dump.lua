@@ -28,14 +28,18 @@
 --                        sprites from it (see below)
 --   videoregs_at_draw.bin  the 013's registers at the same instant
 --   sprite_bitmap.bin    the 013's output composited into this picture:
---                        320 x 240 u16 (rows to the screen's height), 0 =
+--                        320 x 240 u16 (rows to the screen's height; from
+--                        x = 1 on Air Gallet and Sailor Moon, whose screen
+--                        is 321 wide and shows 1..320), 0 =
 --                        transparent, else colour code << 8 | pen with the
 --                        priority in bits 14-15 ((attr & 0x30) << 10 |
 --                        (attr & 0x3f00) | pen)
 --   workram.bin          the 68000's 64 KB of work RAM
 --   screen.png           MAME's picture of this frame (screen:snapshot)
 --   frame.json           frame numbers, times, the draw, the bank drawn, the
---                        layers' state
+--                        layers' state (and, on Air Gallet and Sailor Moon,
+--                        layer 2's tile bank: bit 0 of the last byte written
+--                        to 700000)
 --
 -- WHICH FRAME IS WHICH
 --
@@ -93,6 +97,11 @@ local IRQ_US = { ddonpach = 90, ddonpachj = 90, feversos = 100, dfeveron = 100,
                  guwange = 2000, guwanges = 2000, uopoko = 2000, uopokoj = 2000,
                  gaia = 2000, theroes = 2000, theroesa = 2000,
                  donpachi = 90, donpachij = 90, donpachijs = 90, donpachikr = 90, donpachihk = 90 }
+-- Air Gallet (init_agallet: init_cave, 100) and Sailor Moon (init_sailormn:
+-- init_guwange, 2000), whose screens show x = 1..320 of 321
+local GAZELLE = {}
+for _, s in ipairs({ "agallet", "agalletu", "agalletj", "agalletk", "agallett", "agalleth", "agalleta", "agalletau", "agalletaj", "agalletak", "agalletat", "agalletah" }) do IRQ_US[s] = 100; GAZELLE[s] = true end
+for _, s in ipairs({ "sailormn", "sailormne", "sailormnu", "sailormnk", "sailormnt", "sailormnh", "sailormnnj", "sailormnne", "sailormnnu", "sailormnnk", "sailormnnt", "sailormnnh", "sailormnoj", "sailormnoe", "sailormnou", "sailormnok", "sailormnot", "sailormnoh" }) do IRQ_US[s] = 2000; GAZELLE[s] = true end
 assert(IRQ_US[romname], "mame_cave_dump.lua is for the Cave 68000 board's sets, not " .. romname)
 local FRAME_S = 0.017376
 
@@ -107,10 +116,12 @@ local function item(tag, name)
 end
 local function need(tag, name) return assert(item(tag, name), "no save item " .. tag .. " " .. name) end
 
--- The work RAM is an anonymous share: the maincpu item named by its range.
+-- The work RAM is an anonymous share: the maincpu item named by its range
+-- (Air Gallet's and Sailor Moon's map has several; theirs is 100000).
 local it_work
 for name, idx in pairs(cpu.items) do
-  if name:match("^0/%x+%-%x+$") then it_work = emu.item(idx); break end
+  if name == "0/100000-10ffff" then it_work = emu.item(idx); break end
+  if not it_work and name:match("^0/%x+%-%x+$") then it_work = emu.item(idx) end
 end
 assert(it_work, "no work RAM item")
 local it_palette   = need(":maincpu", "0/:palette.0")
@@ -133,6 +144,16 @@ for n = 0, 3 do
 end
 local BM_W = it_bitmap.count // 512           -- 512 rows (512 x 512, any row padding)
 assert(BM_W >= 512, "unexpected sprite bitmap size " .. it_bitmap.count)
+local X0 = GAZELLE[romname] and 1 or 0        -- the first column on screen
+
+-- Layer 2's tile bank (sailormn_eeprom_w: bit 0 of the byte at 700000)
+local tile_bank = 0
+if GAZELLE[romname] then
+  _G.cave_tilebank_tap = space:install_write_tap(0x700000, 0x700001, "cave_dump_tilebank",
+    function(offset, data, mask)
+      if offset == 0x700000 and (mask & 0xff00) ~= 0 then tile_bank = (data >> 8) & 1 end
+    end)
+end
 
 -- ------------------------------------------------------------ writers
 local outdir = DIR
@@ -207,7 +228,7 @@ local function dump_frame(n)
   end
   local h = scr.height
   write("sprite_bitmap.bin", words_le(function(i)
-    return it_bitmap:read((i // 320) * BM_W + (i % 320)) end, 320 * h))
+    return it_bitmap:read((i // 320) * BM_W + (i % 320) + X0) end, 320 * h))
   local err = scr:snapshot(outdir .. "/screen.png")
 
   local f = assert(io.open(outdir .. "/frame.json", "w"))
@@ -232,6 +253,7 @@ local function dump_frame(n)
   kv("sprite_bitmap_reflects", json_str(string.format(
     "m_sprite_bitmap at notifier %d = the sprite layer composited into picture %d", n, n)))
   kv("videoregs", json_str(hexwords(it_videoregs, 8)))
+  if GAZELLE[romname] then kv("tile_bank", tile_bank) end
   for _, L in ipairs(layers) do
     kv("layer" .. L.n .. "_regs", json_str(hexwords(L.regs)))
     kv("layer" .. L.n .. "_tiledim", L.tiledim:read(0))

@@ -35,7 +35,7 @@ module cave68000_mem #(
   input  wire          rst_vid,
 
   input  wire          rom_loaded,
-  input  wire [2:0]    game,
+  input  wire [3:0]    game,            // as cave68000's
 
   input  wire [7:0]    p1, p2,
   input  wire [1:0]    coin, start,
@@ -91,9 +91,17 @@ module cave68000_mem #(
 );
 
   // ------------------------------------------------------ region offsets
+  // the board's index, as cave68000 takes it
+`ifdef CAVE_OKI
+  wire [3:0] gameIndex = 4'd2;
+`elsif CAVE_Z80
+  wire [3:0] gameIndex = (game == 4'd10) ? 4'd10 : 4'd9;
+`else
+  wire [3:0] gameIndex = (game[2:0] == 3'd7) ? 4'd1 : {1'b0, game[2:0]};
+`endif
   wire [31:0] off_ee, off_snd, off_l0, off_l1, off_l2, off_spr;
   CaveGameConfig cfg (
-    .game_index (game == 3'd7 ? 4'd1 : {1'b0, game}),
+    .game_index (gameIndex),
     .granularity (), .eeprom_offset (off_ee), .sound_0_device (),
     .sound_0_rom_offset (off_snd), .sound_1_rom_offset (), .sound_2_rom_offset (),
     .layer_0_format (), .layer_0_rom_offset (off_l0), .layer_0_palette_bank (),
@@ -214,7 +222,7 @@ module cave68000_mem #(
   // ----------------------------------------------------------- the 93C46
   cave_eeprom_store #(.AW(AW)) ee (
     .clk (clk), .rst (rst),
-    .eeprom_offset (off_ee), .has_eeprom (game != 3'd6),
+    .eeprom_offset (off_ee), .has_eeprom (gameIndex != 4'd6),
     .dl_wr (dl_wr), .dl_addr (dl_addr), .dl_data (dl_data),
     .ee_rd (ee_rd), .ee_wr (ee_wr), .ee_addr (ee_addr), .ee_din (ee_din),
     .ee_dout (ee_dout), .ee_valid (ee_valid),

@@ -11,6 +11,7 @@ module ColorMixer(
   input  [1:0]  io_gameConfig_layer_2_format,
   input  [1:0]  io_gameConfig_layer_2_paletteBank,
   input         io_gameConfig_pwrinst2,
+  input         io_gameConfig_sailormn,   // the background pen 7f0, as pwrinst2's
   input  [1:0]  io_spritePen_priority,
   input  [5:0]  io_spritePen_palette,
   input  [7:0]  io_spritePen_color,
@@ -114,7 +115,7 @@ module ColorMixer(
     layer2Priority3 ? PEN_LAYER2 : priority3PwrInst2Layer2;
   wire [4:0] finalSelectedPen = selectedPen;
 
-  wire [14:0] fillAddr16 = io_gameConfig_pwrinst2 ? 15'h07F0 : 15'h03F0;
+  wire [14:0] fillAddr16 = io_gameConfig_pwrinst2 | io_gameConfig_sailormn ? 15'h07F0 : 15'h03F0;
   wire [14:0] fillAddr64 = 15'h0FC0;
   wire [14:0] fillAddr256 = 15'h3F00;
   wire [14:0] fillAddr = granularity64 ? fillAddr64 : (granularity16 ? fillAddr16 : fillAddr256);

@@ -9,7 +9,8 @@ For each f<NNNNN> under DUMPDIR (tools/mame_cave_dump.lua's) that recorded a
 sprite draw – or the frames listed, comma-separated – this builds the loader
 (cave_dump_loader.py), runs the harness on build/pocket/SET.rom with it
 (build/obj_ddonpach/tb_ddonpach --prog --replay; sim/ddonpach/build.sh first;
-DonPachi's sets build/obj_donpachi/tb_ddonpach, sim/ddonpach/build.sh --oki)
+DonPachi's sets build/obj_donpachi/tb_ddonpach, sim/ddonpach/build.sh --oki;
+Air Gallet's and Sailor Moon's build/obj_z80/tb_ddonpach, build.sh --z80)
 and holds what the board shows against MAME:
 
   picture   frame_N.ppm against screen.png (RGB, 320 x the screen's height)
@@ -41,9 +42,12 @@ GAME = {"dfeveron": 0, "feversos": 0, "ddonpach": 1, "ddonpachj": 1,
         "esprade": 3, "espradej": 3, "espradejo": 3, "uopoko": 4, "uopokoj": 4,
         "guwange": 5, "guwanges": 5, "gaia": 6, "theroes": 6, "theroesa": 6,
         "donpachi": 2, "donpachij": 2, "donpachijs": 2, "donpachikr": 2, "donpachihk": 2}
+GAME.update({s: 9 for s in (('agallet', 'agalletu', 'agalletj', 'agalletk', 'agallett', 'agalleth', 'agalleta', 'agalletau', 'agalletaj', 'agalletak', 'agalletat', 'agalletah'))})
+GAME.update({s: 10 for s in (('sailormn', 'sailormne', 'sailormnu', 'sailormnk', 'sailormnt', 'sailormnh', 'sailormnnj', 'sailormnne', 'sailormnnu', 'sailormnnk', 'sailormnnt', 'sailormnnh', 'sailormnoj', 'sailormnoe', 'sailormnou', 'sailormnok', 'sailormnot', 'sailormnoh'))})
 HERE = os.path.dirname(os.path.abspath(__file__))
 TB = "build/obj_ddonpach/tb_ddonpach"
 OKI_SETS = ("donpachi", "donpachij", "donpachijs", "donpachikr", "donpachihk")
+Z80_SETS = tuple(s for s, g in GAME.items() if g in (9, 10))
 
 
 def main():
@@ -68,6 +72,8 @@ def main():
     setname, dumpdir = args[0], args[1]
     if setname in OKI_SETS:            # DonPachi's board: sim/ddonpach/build.sh [--pocket] --oki
         TB = TB.replace("obj_ddonpach", "obj_donpachi").replace("obj_pocket/", "obj_pocket_oki/")
+    if setname in Z80_SETS:            # Air Gallet's and Sailor Moon's: build.sh [--pocket] --z80
+        TB = TB.replace("obj_ddonpach", "obj_z80").replace("obj_pocket/", "obj_pocket_z80/")
     out = out or os.path.join("build/sim/replay", setname)
     os.makedirs(out, exist_ok=True)
     if len(args) > 2:
