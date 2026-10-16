@@ -81,6 +81,7 @@ module cave_fit_top (
   cave68000 board (
     .clk (clk), .rst (rst), .clk_cpu (clk_cpu), .rst_cpu (rst_cpu), .clk_vid (clk_vid), .rst_vid (rst_vid),
     .rom_loaded (rom_loaded), .game (game),
+    .dl_wr (1'b0), .dl_addr (25'd0), .dl_data (16'd0),
     .p1 (p1), .p2 (p2), .coin (coin), .start (start), .service (service), .pause (pause), .dsw (dsw),
     .prog_rd (prog_rd), .prog_addr (prog_addr), .prog_dout (prog_dout), .prog_wait_n (prog_wait_n), .prog_valid (prog_valid),
     .snd_rd (snd_rd), .snd_addr (snd_addr), .snd_dout (snd_dout), .snd_wait_n (snd_wait_n), .snd_valid (snd_valid),

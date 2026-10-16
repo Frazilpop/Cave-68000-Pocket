@@ -13,7 +13,8 @@
 //         offsets (CaveGameConfig) are added here, as upstream's MemSys did.
 //   row   the sprite frame buffer, one 16-word row at a time, page 0 on
 //         chip 0 and page 1 on chip 1 (cave_fb_rows).
-//   dl    the loader's stream past the SDRAM, for the EEPROM's seed.
+//   dl    the loader's stream past the SDRAM, for the EEPROM's seed (and on
+//         the Z80 build the sound CPU's first 16 KB, which the board keeps).
 //   nv    the 93C46's store for the save slot (cave_eeprom_store).
 //
 // Platform-neutral like the board: the Pocket shell serves these ports with
@@ -137,10 +138,13 @@ module cave68000_mem #(
   wire [6:0]  ee_addr;
   wire [15:0] ee_din, ee_dout;
 
+  wire [24:0] dlWord = dl_addr;         // the image's word address
+
   cave68000 board (
     .clk (clk), .rst (rst), .clk_cpu (clk_cpu), .rst_cpu (rst_cpu),
     .clk_vid (clk_vid), .rst_vid (rst_vid),
     .rom_loaded (rom_loaded), .game (game),
+    .dl_wr (dl_wr), .dl_addr (dlWord), .dl_data (dl_data),
     .p1 (p1), .p2 (p2), .coin (coin), .start (start),
     .service (service), .pause (pause), .dsw (dsw),
     .prog_rd (prog_rd), .prog_addr (prog_a), .prog_dout (prog_dout),

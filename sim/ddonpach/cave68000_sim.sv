@@ -79,6 +79,10 @@ module cave68000_sim (
   input  wire [1:0]  coin, start,
   input  wire        service, pause,
   input  wire [15:0] dsw,
+  // the loader's stream (the Z80 build keeps its sound CPU's first 16 KB)
+  input  wire        dl_wr,
+  input  wire [24:0] dl_addr,
+  input  wire [15:0] dl_data,
 
   // the caches' line reads: byte address in the image, four words back
   output wire        prog_rd,
@@ -141,7 +145,16 @@ module cave68000_sim (
   output wire [7:0]  dbg_oki_din,
   output wire [2:0]  dbg_nmk_addr,
   output wire        dbg_oki_sv0, dbg_oki_sv1,
-  output wire [19:0] dbg_oki_s0, dbg_oki_s1
+  output wire [19:0] dbg_oki_s0, dbg_oki_s1,
+  // the Z80 sound board: each access its Z80 makes (SoundZ80's taps)
+  output wire        dbg_z80_reset,      // the sound board held in reset (its time 0 the first clock after)
+  output wire        dbg_z80_cmd,        // the 68000's command written to the latch, this clock
+  output wire        dbg_z80_act, dbg_z80_acc, dbg_z80_io, dbg_z80_wr, dbg_z80_m1,
+  output wire [15:0] dbg_z80_addr,
+  output wire [7:0]  dbg_z80_data, dbg_z80_late,
+  output wire [39:0] dbg_z80_time,       // the sound board's clock of the access (MAME's time)
+  output wire        dbg_ym_sample,
+  output wire [15:0] dbg_ym_left, dbg_ym_right
 );
 `ifdef CAVE_OKI
   wire [3:0] gameIndex = 4'd2;
@@ -200,6 +213,7 @@ module cave68000_sim (
     .clk (clk), .rst (rst), .clk_cpu (clk_cpu), .rst_cpu (rst_cpu),
     .clk_vid (clk_vid), .rst_vid (rst_vid),
     .rom_loaded (rom_loaded), .game (game),
+    .dl_wr (dl_wr), .dl_addr (dl_addr), .dl_data (dl_data),
     .p1 (p1), .p2 (p2), .coin (coin), .start (start),
     .service (service), .pause (pause), .dsw (dsw),
     .prog_rd (prog_rd), .prog_addr (prog_a), .prog_dout (prog_dout),
@@ -257,11 +271,30 @@ module cave68000_sim (
   assign dbg_oki_sv1  = dut.sound.io_sample_valid_1;
   assign dbg_oki_s0   = dut.sound.io_sample_0;
   assign dbg_oki_s1   = dut.sound.io_sample_1;
+  assign {dbg_z80_reset, dbg_z80_cmd, dbg_z80_act, dbg_z80_acc, dbg_z80_io, dbg_z80_wr, dbg_z80_m1, dbg_z80_addr, dbg_z80_data, dbg_z80_late, dbg_z80_time} = '0;
+  assign {dbg_ym_sample, dbg_ym_left, dbg_ym_right} = '0;
 `elsif CAVE_Z80
-  // the Z80 sound board: nothing to tap yet
+  // the Z80 sound board
   assign {dbg_ymz_busy, dbg_ymz_begin, dbg_ymz_apply} = '0;
   assign {dbg_oki_wr0, dbg_oki_wr1, dbg_nmk_wr, dbg_oki_tick, dbg_oki_din, dbg_nmk_addr} = '0;
-  assign {dbg_oki_sv0, dbg_oki_sv1, dbg_oki_s0, dbg_oki_s1} = '0;
+  assign dbg_oki_sv0  = dut.sound.dbg_oki_sv0;
+  assign dbg_oki_sv1  = dut.sound.dbg_oki_sv1;
+  assign dbg_oki_s0   = dut.sound.dbg_oki_s0;
+  assign dbg_oki_s1   = dut.sound.dbg_oki_s1;
+  assign dbg_z80_reset = dut.sound.reset;
+  assign dbg_z80_cmd  = dut.sound.io_cmd_wr;
+  assign dbg_z80_act  = dut.sound.dbg_act;
+  assign dbg_z80_acc  = dut.sound.dbg_acc;
+  assign dbg_z80_io   = dut.sound.dbg_acc_io;
+  assign dbg_z80_wr   = dut.sound.dbg_acc_wr;
+  assign dbg_z80_m1   = dut.sound.dbg_acc_m1;
+  assign dbg_z80_addr = dut.sound.dbg_acc_addr;
+  assign dbg_z80_data = dut.sound.dbg_acc_data;
+  assign dbg_z80_late = dut.sound.dbg_acc_late;
+  assign dbg_z80_time = dut.sound.dbg_acc_time;
+  assign dbg_ym_sample = dut.sound.dbg_ym_sample;
+  assign dbg_ym_left  = dut.sound.dbg_ym_left;
+  assign dbg_ym_right = dut.sound.dbg_ym_right;
 `else
   assign dbg_ymz_busy = dut.sound.ymz280b.channelCtrl.state != 4'd0;
   // the next clk_cpu edge begins a sample (an access on it lands after the sample)
@@ -273,6 +306,8 @@ module cave68000_sim (
   assign dbg_ymz_apply = dut.sound.ymz280b.apply;
   assign {dbg_oki_wr0, dbg_oki_wr1, dbg_nmk_wr, dbg_oki_tick, dbg_oki_din, dbg_nmk_addr} = '0;
   assign {dbg_oki_sv0, dbg_oki_sv1, dbg_oki_s0, dbg_oki_s1} = '0;
+  assign {dbg_z80_reset, dbg_z80_cmd, dbg_z80_act, dbg_z80_acc, dbg_z80_io, dbg_z80_wr, dbg_z80_m1, dbg_z80_addr, dbg_z80_data, dbg_z80_late, dbg_z80_time} = '0;
+  assign {dbg_ym_sample, dbg_ym_left, dbg_ym_right} = '0;
 `endif
 endmodule
 

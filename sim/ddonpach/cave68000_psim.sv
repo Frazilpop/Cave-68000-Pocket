@@ -67,6 +67,15 @@ module cave68000_psim #(
   output wire [2:0]  dbg_nmk_addr,
   output wire        dbg_oki_sv0, dbg_oki_sv1,
   output wire [19:0] dbg_oki_s0, dbg_oki_s1,
+  // the Z80 sound board: each access its Z80 makes (SoundZ80's taps)
+  output wire        dbg_z80_reset,      // the sound board held in reset (its time 0 the first clock after)
+  output wire        dbg_z80_cmd,        // the 68000's command written to the latch, this clock
+  output wire        dbg_z80_act, dbg_z80_acc, dbg_z80_io, dbg_z80_wr, dbg_z80_m1,
+  output wire [15:0] dbg_z80_addr,
+  output wire [7:0]  dbg_z80_data, dbg_z80_late,
+  output wire [39:0] dbg_z80_time,       // the sound board's clock of the access (MAME's time)
+  output wire        dbg_ym_sample,
+  output wire [15:0] dbg_ym_left, dbg_ym_right,
   output wire [6:0]  dbg_rom_req          // the seven read ports, for their wait counts
 );
   localparam int unsigned AW = 25;
@@ -201,11 +210,30 @@ module cave68000_psim #(
   assign dbg_oki_sv1  = mem.board.sound.io_sample_valid_1;
   assign dbg_oki_s0   = mem.board.sound.io_sample_0;
   assign dbg_oki_s1   = mem.board.sound.io_sample_1;
+  assign {dbg_z80_reset, dbg_z80_cmd, dbg_z80_act, dbg_z80_acc, dbg_z80_io, dbg_z80_wr, dbg_z80_m1, dbg_z80_addr, dbg_z80_data, dbg_z80_late, dbg_z80_time} = '0;
+  assign {dbg_ym_sample, dbg_ym_left, dbg_ym_right} = '0;
 `elsif CAVE_Z80
-  // the Z80 sound board: nothing to tap yet
+  // the Z80 sound board
   assign {dbg_ymz_busy, dbg_ymz_begin, dbg_ymz_apply} = '0;
   assign {dbg_oki_wr0, dbg_oki_wr1, dbg_nmk_wr, dbg_oki_tick, dbg_oki_din, dbg_nmk_addr} = '0;
-  assign {dbg_oki_sv0, dbg_oki_sv1, dbg_oki_s0, dbg_oki_s1} = '0;
+  assign dbg_oki_sv0  = mem.board.sound.dbg_oki_sv0;
+  assign dbg_oki_sv1  = mem.board.sound.dbg_oki_sv1;
+  assign dbg_oki_s0   = mem.board.sound.dbg_oki_s0;
+  assign dbg_oki_s1   = mem.board.sound.dbg_oki_s1;
+  assign dbg_z80_reset = mem.board.sound.reset;
+  assign dbg_z80_cmd  = mem.board.sound.io_cmd_wr;
+  assign dbg_z80_act  = mem.board.sound.dbg_act;
+  assign dbg_z80_acc  = mem.board.sound.dbg_acc;
+  assign dbg_z80_io   = mem.board.sound.dbg_acc_io;
+  assign dbg_z80_wr   = mem.board.sound.dbg_acc_wr;
+  assign dbg_z80_m1   = mem.board.sound.dbg_acc_m1;
+  assign dbg_z80_addr = mem.board.sound.dbg_acc_addr;
+  assign dbg_z80_data = mem.board.sound.dbg_acc_data;
+  assign dbg_z80_late = mem.board.sound.dbg_acc_late;
+  assign dbg_z80_time = mem.board.sound.dbg_acc_time;
+  assign dbg_ym_sample = mem.board.sound.dbg_ym_sample;
+  assign dbg_ym_left  = mem.board.sound.dbg_ym_left;
+  assign dbg_ym_right = mem.board.sound.dbg_ym_right;
 `else
   assign dbg_ymz_busy = mem.board.sound.ymz280b.channelCtrl.state != 4'd0;
   // the next clk_cpu edge begins a sample (an access on it lands after the sample)
@@ -217,6 +245,8 @@ module cave68000_psim #(
   assign dbg_ymz_apply = mem.board.sound.ymz280b.apply;
   assign {dbg_oki_wr0, dbg_oki_wr1, dbg_nmk_wr, dbg_oki_tick, dbg_oki_din, dbg_nmk_addr} = '0;
   assign {dbg_oki_sv0, dbg_oki_sv1, dbg_oki_s0, dbg_oki_s1} = '0;
+  assign {dbg_z80_reset, dbg_z80_cmd, dbg_z80_act, dbg_z80_acc, dbg_z80_io, dbg_z80_wr, dbg_z80_m1, dbg_z80_addr, dbg_z80_data, dbg_z80_late, dbg_z80_time} = '0;
+  assign {dbg_ym_sample, dbg_ym_left, dbg_ym_right} = '0;
 `endif
   assign dbg_rom_req  = rom_req;
 endmodule

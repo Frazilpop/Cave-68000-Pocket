@@ -87,6 +87,10 @@ module YM2151 #(
   output reg signed [15:0] io_left,
   output reg signed [15:0] io_right,
   output            [1:0]  io_ct,       // register 1b's top two bits
+  output                   io_tmr_a_arm,  // timer A running, its flag enabled: it will raise IRQ
+  output            [23:0] io_tmr_a_cnt,  //   on the io_tmr_a_cnt-th cen_t from now (this clock's the first)
+  output                   io_tmr_b_arm,  // timer B the same
+  output            [23:0] io_tmr_b_cnt,
   output reg               io_overrun   // a sample due before the last was done, or the queue full
 );
   localparam integer TK = 64 * TSCALE;  // cen_t pulses in a sample
@@ -174,6 +178,10 @@ module YM2151 #(
   assign io_dout = io_a0 ? status : 8'hff;
   assign io_irq  = flagA | flagB;
   assign io_ct   = rCtw[7:6];
+  assign io_tmr_a_arm = runA & rMode[2];
+  assign io_tmr_a_cnt = cntA;
+  assign io_tmr_b_arm = runB & rMode[3];
+  assign io_tmr_b_cnt = cntB;
 
   wire wrMode = wrData && addr == 8'h14;
 

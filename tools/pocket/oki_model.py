@@ -46,6 +46,14 @@ before the write. --lazy-banks plays that; without it a bank write takes
 effect at its own time. The two agree as long as no voice is playing out of
 a bank when it is switched.
 
+--z80: Air Gallet's and Sailor Moon's sound board instead (cave.cpp's agallet
+machine): the log is tools/mame_cave_z80.lua's (or tb_z80's --log), the
+Z80's writes to ports 60 and 80 the chips' commands, its reads there their
+status, its writes to 70 and c0 their banks (oki_bank_w: the low nibble the
+128 KB page of the chip's 00000-1ffff, the high nibble that of 20000-3ffff);
+both chips on 2.112 MHz / 132, 16,000 Hz; their regions the image's oki0 and
+oki1 (0x480080, 0x680080, build_rom.py's layout for games 9 and 10).
+
 Writes --out.0 and --out.1: each chip's samples, little-endian int32, the
 sum over the voices of signal * volume (volume 0x20 = 0 dB; MAME's sample
 is that / 32 / 2048). --wav: the two mixed as cave.cpp routes them (OKI 0 at
@@ -74,6 +82,8 @@ for step in range(49):
         DIFF.append(b[0] * (stepval * b[1] + stepval // 2 * b[2] + stepval // 4 * b[3] + stepval // 8))
 
 OKI0_BASE, OKI1_BASE = 0x080080, 0x280080       # build_rom.py's donpachi layout
+Z80_RATE = 16000
+Z80_OKI_BASE = (0x480080, 0x680080)             # games 9 and 10
 
 
 class Voice:
@@ -86,11 +96,12 @@ class Voice:
 
 
 class Chip:
-    def __init__(self, idx, rom, banks):
+    def __init__(self, idx, rom, banks, z80=False):
         self.idx = idx
         self.rom = rom
         self.banks = banks              # the NMK112's eight registers (shared list)
-        self.rate = RATES[idx]
+        self.z80 = z80                  # oki_bank_w: banks[4 * idx] the chip's two nibbles
+        self.rate = Z80_RATE if z80 else RATES[idx]
         self.voices = [Voice() for _ in range(4)]
         self.command = -1
         self.made = 0                   # samples made so far
@@ -99,6 +110,10 @@ class Chip:
     def read_byte(self, addr, banks=None):
         b = banks or self.banks
         addr &= 0x3ffff
+        if self.z80:
+            reg = b[4 * self.idx]
+            page = (reg >> 4 if addr & 0x20000 else reg) & 15
+            return self.rom[Z80_OKI_BASE[self.idx] + (page << 17) + (addr & 0x1ffff)]
         q = addr >> 16
         if self.idx == 0:
             return self.rom[OKI0_BASE + ((b[q] & 31) << 16) + (addr & 0xffff)]
@@ -165,12 +180,14 @@ def main():
     ap.add_argument("--wav")
     ap.add_argument("--lazy-banks", action="store_true",
                     help="a bank write waits for the chip's next access, as in MAME")
+    ap.add_argument("--z80", action="store_true",
+                    help="Air Gallet's and Sailor Moon's sound board and its log")
     a = ap.parse_args()
 
     rom = open(a.rom, "rb").read()
     banks = [0] * 8
     pending = [0] * 8                   # --lazy-banks: written, not yet seen by each chip
-    chips = [Chip(0, rom, banks), Chip(1, rom, banks)]
+    chips = [Chip(0, rom, banks, a.z80), Chip(1, rom, banks, a.z80)]
     seen = [list(banks), list(banks)]   # the banks each chip's next update reads
     end_t = 0.0
     ok = bad = 0
@@ -187,6 +204,17 @@ def main():
                 end_t = float(line.split()[3])
             continue
         f = line.split()
+        if a.z80:
+            # Z80 port accesses become the DonPachi log's kinds
+            if len(f) < 5 or f[1] != "Z":
+                continue
+            port = int(f[3], 16)
+            if port in (0x70, 0xc0) and f[2] == "W":
+                f = [f[0], "N", str(0 if port == 0x70 else 4), f[4]]
+            elif port in (0x60, 0x80):
+                f = [f[0], "W" if f[2] == "W" else "S", "0" if port == 0x60 else "1", f[4]]
+            else:
+                continue
         t, kind = float(f[0]), f[1]
         end_t = t
         if kind == "N":
