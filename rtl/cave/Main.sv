@@ -130,6 +130,18 @@ module Main(
   input  [15:0]  io_eeprom_dout,
   input          io_eeprom_wait_n,
   input          io_eeprom_valid,
+  // The 68000's own RAM off the chip (CAVE_Z80 only; tied off otherwise):
+  // the main RAM at words 0000-7fff and Sailor Moon's three layer
+  // scratchpads at 8000 + 2000 * layer, as one single-port RAM. The address
+  // follows the 68000's on every clock, read strobe or not, so that the RAM
+  // behind it can be read before the strobe; io_xram_dout is taken as the
+  // block RAMs' q was, on the third clock after the strobe.
+  output         io_xram_rd,
+  output         io_xram_wr,
+  output [15:0]  io_xram_addr,
+  output [1:0]   io_xram_mask,
+  output [15:0]  io_xram_din,
+  input  [15:0]  io_xram_dout,
   input          io_hs_config_download,
   input          io_hs_config_wr,
   input  [26:0]  io_hs_config_addr,
@@ -1136,6 +1148,14 @@ module Main(
   wire [15:0] smSoundReplyData;
 
   genvar smK;
+`ifdef CAVE_Z80
+  // On the Z80 build the scratchpads are the RAM off the chip (io_xram_*).
+  wire [1:0]  smScratchLayer = smLayerSelect[2] ? 2'd2 : smLayerSelect[1] ? 2'd1 : 2'd0;
+  wire        smScratchAny = |smLayerSelect & smInScratch;
+  assign smScratchDout[0] = io_xram_dout;
+  assign smScratchDout[1] = io_xram_dout;
+  assign smScratchDout[2] = io_xram_dout;
+`else
   generate
     for (smK = 0; smK < 3; smK = smK + 1) begin : smScratch
       CaveSinglePortRam #(
@@ -1154,6 +1174,7 @@ module Main(
       );
     end
   endgenerate
+`endif
 
   CaveSoundReplyReadLatch smSoundReplyReadLatch (
     .clock       (clock),
@@ -4834,6 +4855,17 @@ module Main(
     ? highScoreRamAddr : mainRamSaveStateAddr;
   assign mainRamPhysicalDin = highScoreRamOwned
     ? highScoreRamDin : mainRamSaveStateDin;
+`ifdef CAVE_Z80
+  // The main RAM and the scratchpads off the chip: the 68000 makes one
+  // access at a time, so the two share the port; which one by the address.
+  assign io_xram_rd   = mainRamPhysicalRd | (|(smScratchSelect & {3{readStrobe}}));
+  assign io_xram_wr   = mainRamPhysicalWr | (|(smScratchSelect & {3{writeStrobe}}));
+  assign io_xram_addr = smScratchAny ? {1'b1, smScratchLayer, smScratchAddr}
+                                     : {1'b0, _mainRam_io_addr};
+  assign io_xram_mask = smScratchAny ? mainRam_io_mask : mainRamPhysicalMask;
+  assign io_xram_din  = smScratchAny ? _cpu_io_dout : mainRamPhysicalDin;
+  assign _mainRam_io_dout = io_xram_dout;
+`else
   CaveSinglePortRam #(
     .ADDR_WIDTH  (15),
     .DATA_WIDTH  (16),
@@ -4848,6 +4880,12 @@ module Main(
     .din   (mainRamPhysicalDin),
     .dout  (_mainRam_io_dout)
   );
+  assign io_xram_rd   = 1'b0;
+  assign io_xram_wr   = 1'b0;
+  assign io_xram_addr = 16'd0;
+  assign io_xram_mask = 2'd0;
+  assign io_xram_din  = 16'd0;
+`endif
   assign _pwrinst2SpriteExtraRam_addr = _cpu_io_addr[14:0];
   CaveSaveStateSinglePortRam #(
     .ADDR_WIDTH  (15),

@@ -5,10 +5,11 @@
 // cave68000_mem (the board and its adapters) with what the Pocket shell puts
 // behind its ports, the same RTL the shell uses: kaneko_sdram for the seven
 // read ports (through cave_sdram, which interleaves the banks),
-// pocket_psram_rows for the frame buffer's two chips. Behind
+// pocket_psram_rows for the frame buffer's two chips, and on the Z80 build
+// pocket_sram for the 68000's own RAM. Behind
 // those, models of the parts: sdram_model (which also checks the SDRAM
 // protocol) holding the ROM image, loaded by the C++ side before reset, and a
-// psram_model per chip. The 68000's bus and the YMZ280B's side are taken by
+// psram_model per chip, and sram_model. The 68000's bus and the YMZ280B's side are taken by
 // hierarchical reference, as cave68000_sim.sv does.
 //
 // The capture depth is the model's (rd_lat_sel 3, CL + 3); the Pocket's
@@ -44,6 +45,7 @@ module cave68000_psim #(
   output wire [13:0] psram_lats,          // chip c at [7c +: 7]: {wr_lat, rd_ph, rd_lat}
   output wire [31:0] sdram_violations,
   output wire [31:0] psram_violations,
+  output wire [31:0] sram_violations,     // the Z80 build's SRAM (0 on the others)
 
   output wire        ce_pix, hs, vs, hblank, vblank, de,
   output wire [7:0]  r, g, b,
@@ -89,6 +91,10 @@ module cave68000_psim #(
   wire [511:0]    row_rdata;
   wire [31:0]     row_wmask;
 
+  wire        xram_rd, xram_wr;
+  wire [15:0] xram_addr, xram_din, xram_dout;
+  wire [1:0]  xram_mask;
+
   cave68000_mem #(.AW (AW), .SPR_PORTS (SPR_PORTS)) mem (
     .clk (clk), .rst (rst), .clk_cpu (clk_cpu), .rst_cpu (rst_cpu),
     .clk_vid (clk_vid), .rst_vid (rst_vid),
@@ -99,6 +105,8 @@ module cave68000_psim #(
     .row_req (row_req), .row_we (row_we), .row_addr (row_addr),
     .row_wdata (row_wdata), .row_wmask (row_wmask), .row_ack (row_ack), .row_rdata (row_rdata),
     .dl_wr (dl_wr), .dl_addr (dl_addr), .dl_data (dl_data),
+    .xram_rd (xram_rd), .xram_wr (xram_wr), .xram_addr (xram_addr),
+    .xram_mask (xram_mask), .xram_din (xram_din), .xram_dout (xram_dout),
     .nv_addr (6'd0), .nv_din (16'd0), .nv_we (1'b0), .nv_dout (), .nv_dirty (), .nv_dirty_clr (1'b0),
     .ce_pix (ce_pix), .hs (hs), .vs (vs), .hblank (hblank), .vblank (vblank), .de (de),
     .r (r), .g (g), .b (b), .snd (snd), .snd_sample (snd_sample), .snd_overrun (snd_overrun),
@@ -172,9 +180,40 @@ module cave68000_psim #(
       assign psram_lats[7*c +: 7] = {wl, rp, rl};
     end
   endgenerate
-  assign psram_ready = &ps_ready;
   assign psram_cal_fail = ps_fail;
   assign psram_violations = ps_viol[0] + ps_viol[1];
+
+  // ------------------------------------------------------------- SRAM
+  // The Z80 build's 68000 RAM: the shell's servant on clk_cpu, cleared from
+  // its own power-on reset; the board is held until it is (psram_ready
+  // waits for it, as the shell's board_loaded does).
+`ifdef CAVE_Z80
+  reg [3:0] por_cpu = 4'hF;
+  always @(posedge clk_cpu) if (por_cpu != 4'd0) por_cpu <= por_cpu - 4'd1;
+  wire        sr_ready, sr_dq_oe, sr_oe_n, sr_we_n, sr_ub_n, sr_lb_n, dev_sr_oe;
+  wire [16:0] sr_a;
+  wire [15:0] sr_dq_o, dev_sr_o;
+  int unsigned sr_viol;
+  pocket_sram sram (
+    .clk (clk_cpu), .rst (por_cpu != 4'd0), .ready (sr_ready),
+    .rd (xram_rd), .wr (xram_wr), .addr (xram_addr), .mask (xram_mask),
+    .din (xram_din), .dout (xram_dout),
+    .sram_a (sr_a), .sram_dq_o (sr_dq_o), .sram_dq_oe (sr_dq_oe),
+    .sram_dq_i (dev_sr_oe ? dev_sr_o : sr_dq_oe ? sr_dq_o : 16'hFFFF),
+    .sram_oe_n (sr_oe_n), .sram_we_n (sr_we_n), .sram_ub_n (sr_ub_n), .sram_lb_n (sr_lb_n)
+  );
+  sram_model sram_dev (
+    .clk (clk_cpu), .a (sr_a), .dq_i (sr_dq_o), .dq_oe_i (sr_dq_oe),
+    .oe_n (sr_oe_n), .we_n (sr_we_n), .ub_n (sr_ub_n), .lb_n (sr_lb_n),
+    .dq_o (dev_sr_o), .dq_oe_o (dev_sr_oe), .violations (sr_viol), .writes ()
+  );
+  assign psram_ready = &ps_ready & sr_ready;
+  assign sram_violations = sr_viol;
+`else
+  assign xram_dout = 16'd0;
+  assign psram_ready = &ps_ready;
+  assign sram_violations = 32'd0;
+`endif
 
   // ------------------------------------------------------------- probes
   assign dbg_as    = mem.board.main._cpu_io_as;

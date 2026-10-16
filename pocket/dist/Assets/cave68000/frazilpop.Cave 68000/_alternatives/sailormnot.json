@@ -1,0 +1,22 @@
+{
+    "instance": {
+        "magic": "APF_VER_1",
+        "core_select": {
+            "id": 2,
+            "select": true
+        },
+        "data_path": "",
+        "data_slots": [
+            {
+                "id": 1,
+                "filename": "sailormnot.rom"
+            }
+        ],
+        "memory_writes": [
+            {
+                "address": "0xF0000000",
+                "data": "0x0000000A"
+            }
+        ]
+    }
+}

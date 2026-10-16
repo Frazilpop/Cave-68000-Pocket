@@ -784,9 +784,9 @@ int main(int argc, char** argv) {
     if (snd_started > 0)
         fprintf(stderr, "sound: %ld samples, %llu late\n", snd_started, (unsigned long long)snd_late);
 #ifdef POCKET_MEM
-    fprintf(stderr, "memory models: %u SDRAM violations, %u PSRAM violations; longest draw %llu clk, "
-            "longest line read wait %u clk\n",
-            (unsigned)t->sdram_violations, (unsigned)t->psram_violations,
+    fprintf(stderr, "memory models: %u SDRAM violations, %u PSRAM violations, %u SRAM violations; "
+            "longest draw %llu clk, longest line read wait %u clk\n",
+            (unsigned)t->sdram_violations, (unsigned)t->psram_violations, (unsigned)t->sram_violations,
             (unsigned long long)draw_max, (unsigned)t->fb_rd_wait_max);
     fprintf(stderr, "longest request to acknowledge, clk: program %llu, samples %llu, layers %llu %llu %llu, sprites %llu %llu\n",
             (unsigned long long)req_max[0], (unsigned long long)req_max[1], (unsigned long long)req_max[2],

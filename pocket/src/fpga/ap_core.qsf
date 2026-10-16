@@ -743,6 +743,7 @@ set_global_assignment -name QIP_FILE core/pin_ddio_clk.qip
 set_global_assignment -name SYSTEMVERILOG_FILE core/pocket_sync.sv
 set_global_assignment -name SYSTEMVERILOG_FILE core/pocket_rom_loader.sv
 set_global_assignment -name SYSTEMVERILOG_FILE core/pocket_psram_rows.sv
+set_global_assignment -name SYSTEMVERILOG_FILE core/pocket_sram.sv
 set_global_assignment -name SYSTEMVERILOG_FILE core/pocket_video.sv
 set_global_assignment -name SYSTEMVERILOG_FILE core/pocket_diag.sv
 set_global_assignment -name SYSTEMVERILOG_FILE core/pocket_nvram.sv
@@ -783,6 +784,19 @@ set_instance_assignment -name FAST_INPUT_REGISTER ON -to dram_dq[*]
 # fit to the next.
 set_instance_assignment -name FAST_INPUT_REGISTER ON -to cram0_dq[*]
 set_instance_assignment -name FAST_INPUT_REGISTER ON -to cram1_dq[*]
+
+# SRAM. The Z80 build's 68000 RAM (pocket_sram, on clk_cpu): the .sdc cuts
+# these pins, and the clock counts in pocket_sram's header are the margin,
+# which holds only with every pin a register in its I/O cell. On the other
+# builds the pins are constant and these do nothing.
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to sram_a[*]
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to sram_oe_n
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to sram_we_n
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to sram_ub_n
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to sram_lb_n
+set_instance_assignment -name FAST_OUTPUT_REGISTER ON -to sram_dq[*]
+set_instance_assignment -name FAST_OUTPUT_ENABLE_REGISTER ON -to sram_dq[*]
+set_instance_assignment -name FAST_INPUT_REGISTER ON -to sram_dq[*]
 
 set_instance_assignment -name PARTITION_HIERARCHY root_partition -to | -section_id Top
 

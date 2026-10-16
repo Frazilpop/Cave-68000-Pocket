@@ -23,16 +23,43 @@ module single_port_ram #(
   input  [ADDR_WIDTH-1:0]     addr,
   input  [DATA_WIDTH/8-1:0]   mask,
   input  [DATA_WIDTH-1:0]     din,
-  output reg [DATA_WIDTH-1:0] dout
+  output     [DATA_WIDTH-1:0] dout
 );
   localparam NUM_WORDS = (DEPTH > 0) ? DEPTH : (1 << ADDR_WIDTH);
   localparam BYTES = DATA_WIDTH / 8;
   reg [DATA_WIDTH-1:0] mem [0:NUM_WORDS-1];
+  reg [DATA_WIDTH-1:0] q;
   integer i;
+  // +spram_lat=N: the 68000's own RAMs (the 64 KB main RAM and the 10 KB
+  // layer scratchpads, the 16-bit RAMs of 32768 and 5120 words) answer N
+  // clocks later than a block RAM, garbage (DEAD) until then – what an
+  // off-chip RAM behind them would do. 0, the default, is a block RAM.
+  // +spram_early=1 instead: those RAMs read as an asynchronous RAM driven
+  // from a register that takes the address on every clock, its data taken
+  // into a register on every clock – garbage unless the address had been on
+  // the pins for three clocks (a1, a2, a3: the register's last three values).
+  integer lat, early;
+  reg [7:0] since;
+  reg [ADDR_WIDTH-1:0] a1, a2, a3;
+  reg [DATA_WIDTH-1:0] qe;
   initial begin
-    dout = {DATA_WIDTH{1'b0}};
+    q = {DATA_WIDTH{1'b0}};
+    qe = {DATA_WIDTH{1'b0}};
+    since = 8'hff;
     for (i = 0; i < NUM_WORDS; i = i + 1) mem[i] = {DATA_WIDTH{1'b0}};
+    if (!(DATA_WIDTH == 16 && (NUM_WORDS == 32768 || NUM_WORDS == 5120)) ||
+        !$value$plusargs("spram_lat=%d", lat))
+      lat = 0;
+    if (!(DATA_WIDTH == 16 && (NUM_WORDS == 32768 || NUM_WORDS == 5120)) ||
+        !$value$plusargs("spram_early=%d", early))
+      early = 0;
   end
+  always @(posedge clk) begin
+    a1 <= addr; a2 <= a1; a3 <= a2;
+    qe <= (a1 == a2 && a2 == a3) ? mem[a1] : {(DATA_WIDTH/16+1){16'hDEAD}};
+  end
+  assign dout = (early != 0) ? qe :
+                (since < lat[7:0]) ? {(DATA_WIDTH/16+1){16'hDEAD}} : q;
   always @(posedge clk) begin
     if (wr) begin
       for (i = 0; i < BYTES; i = i + 1)
@@ -40,9 +67,11 @@ module single_port_ram #(
           mem[addr][i*8 +: 8] <= din[i*8 +: 8];
     end
     if (rd) begin
+      since <= 8'd0;
       for (i = 0; i < BYTES; i = i + 1)
-        dout[i*8 +: 8] <= (wr && (MASK_ENABLE != "TRUE" || mask[i])) ? din[i*8 +: 8] : mem[addr][i*8 +: 8];
-    end
+        q[i*8 +: 8] <= (wr && (MASK_ENABLE != "TRUE" || mask[i])) ? din[i*8 +: 8] : mem[addr][i*8 +: 8];
+    end else if (since != 8'hff)
+      since <= since + 8'd1;
   end
 endmodule
 

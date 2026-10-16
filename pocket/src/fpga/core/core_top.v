@@ -39,6 +39,14 @@
 
 `default_nettype none
 
+// The sound counter of the overlay (DIAGNOSTICS) is in the two bitstreams
+// with a sound board of their own, DonPachi's and the Z80's.
+`ifdef CAVE_OKI
+`define CORE_SND_DIAG
+`elsif CAVE_Z80
+`define CORE_SND_DIAG
+`endif
+
 module core_top (
 
 //
@@ -310,12 +318,15 @@ assign vpll_feed = 1'bZ;
 
 // The SRAM is not used: the 68000's work RAM stays in block RAM, where
 // upstream has it. Every control held inactive, the bus let go.
+// sram: the Z80 build's 68000 RAM (pocket_sram, below); idle on the others
+`ifndef CAVE_Z80
 assign sram_a    = 17'd0;
 assign sram_dq   = 16'hzzzz;
 assign sram_oe_n = 1'b1;
 assign sram_we_n = 1'b1;
 assign sram_ub_n = 1'b1;
 assign sram_lb_n = 1'b1;
+`endif
 
 // ================================================================= clocks
 wire clk, clk_cpu, clk_sdram_ps, clk_vid, clk_pix, clk_pix90;
@@ -386,10 +397,12 @@ wire [31:0] nv_bridge_rd;
 // interact values only when there are some, so on a first boot the core's
 // reset value IS the setting.
 //
-//   0xF0000000 [2:0]   game: CaveGameConfig's index, as the instance JSON
+//   0xF0000000 [3:0]   game: CaveGameConfig's index, as the instance JSON
 //                      writes it: 0 feversos, dfeveron; 1 ddonpach(j);
 //                      3 esprade(j, jo); 4 uopoko(j); 5 guwange(s);
-//                      6 gaia, theroes(a)
+//                      6 gaia, theroes(a); on their own bitstreams 2 the
+//                      donpachi sets (CAVE_OKI), 9 the agallet sets and
+//                      10 the sailormn sets (CAVE_Z80)
 //   0xF1000000         write 1: Test Mode, an action: one press of the
 //                      board's test button (a 1 ms pulse; upstream stretches
 //                      its edge into a press of 2.5 s, which the games take
@@ -411,7 +424,7 @@ wire [31:0] nv_bridge_rd;
 //   0xF100000C         write: reset the game (1 ms)
 //   0xF1000014 [0]     diagnostic overlay (pocket_diag), see DIAGNOSTICS
 
-reg  [2:0]  game_74  = 3'd0;
+reg  [3:0]  game_74  = 4'd0;
 wire        osnotify_inmenu;                //   APF's menu open (core_bridge_cmd, clk_74a)
 reg         test_pend = 1'b0;               //   a press waiting for the menu to close
 reg  [16:0] test_cnt  = 17'd0;              //   1 ms, as the reset
@@ -430,9 +443,9 @@ always @(posedge clk_74a) begin
     if (bridge_wr) begin
         case (bridge_addr)
         32'hF0000000: begin
-            game_74 <= bridge_wr_data[2:0];
+            game_74 <= bridge_wr_data[3:0];
             // a new game is taken with the board in reset (the .sdc relies on it)
-            if (bridge_wr_data[2:0] != game_74) hrst_cnt <= 17'd74250;
+            if (bridge_wr_data[3:0] != game_74) hrst_cnt <= 17'd74250;
         end
         32'hF1000000: if (bridge_wr_data[0]) test_pend <= 1'b1;
         32'hF100000C: hrst_cnt <= 17'd74250;
@@ -445,7 +458,7 @@ end
 always @(posedge clk_74a) begin
     casez (bridge_addr)
     32'h2???????: bridge_rd_data <= nv_bridge_rd;
-    32'hF0000000: bridge_rd_data <= {29'd0, game_74};
+    32'hF0000000: bridge_rd_data <= {28'd0, game_74};
     32'hF1000014: bridge_rd_data <= {31'd0, diag_74};
     32'hF8??????: bridge_rd_data <= cmd_bridge_rd_data;
     default:      bridge_rd_data <= 32'd0;
@@ -617,7 +630,7 @@ core_bridge_cmd icb (
 );
 
 // ======================================================== settings -> clk
-wire [2:0]  game;
+wire [3:0]  game;
 wire        host_rst, diag_opt, test_opt;
 
 pocket_sync_bus #(.W(3), .INIT(3'd0)) s_cfg96 (
@@ -630,7 +643,7 @@ pocket_sync_bus #(.W(3), .INIT(3'd0)) s_cfg96 (
 // reset, and writing a different one resets the game (above), so it never
 // changes while the board runs. The board reads it in all three of its
 // clock domains, and core_constraints.sdc cuts the paths from this register.
-pocket_sync_bus #(.W(3), .INIT(3'd0)) s_game96 (
+pocket_sync_bus #(.W(4), .INIT(4'd0)) s_game96 (
     .clk (clk),
     .d   (game_74),
     .q   (game)
@@ -898,14 +911,44 @@ wire [15:0] snd;
 wire        snd_sample, snd_overrun, spr_swap, cpu_as;
 wire        diag_clr;
 wire [15:0] fb_rows_written, fb_rows_read, fb_rd_wait_max;
-wire        board_loaded = rom_loaded & (&ps_ready);
+wire        xram_rd, xram_wr;
+wire [15:0] xram_addr, xram_din, xram_dout;
+wire [1:0]  xram_mask;
+
+`ifdef CAVE_Z80
+// THE 68000'S OWN RAM in the SRAM (pocket_sram says why and how), on clk_cpu.
+// It is cleared once, from the power-on reset, and the board is held until
+// then; a reset of the game leaves it alone, as it left the block RAMs.
+reg         rst_por_cpu = 1'b1;
+always @(posedge clk_cpu) rst_por_cpu <= rst_por;
+wire        sram_ready;
+wire [15:0] sram_dq_o;
+wire        sram_dq_oe;
+pocket_sram u_sram (
+    .clk        (clk_cpu),     .rst        (rst_por_cpu), .ready (sram_ready),
+    .rd         (xram_rd),     .wr         (xram_wr),     .addr  (xram_addr),
+    .mask       (xram_mask),   .din        (xram_din),    .dout  (xram_dout),
+    .sram_a     (sram_a),      .sram_dq_o  (sram_dq_o),   .sram_dq_oe (sram_dq_oe),
+    .sram_dq_i  (sram_dq),
+    .sram_oe_n  (sram_oe_n),   .sram_we_n  (sram_we_n),
+    .sram_ub_n  (sram_ub_n),   .sram_lb_n  (sram_lb_n)
+);
+assign sram_dq = sram_dq_oe ? sram_dq_o : 16'hzzzz;
+reg         sram_ready_96 = 1'b0;           // clk_cpu is aligned with clk
+always @(posedge clk) sram_ready_96 <= sram_ready;
+`else
+assign xram_dout = 16'd0;
+wire        sram_ready_96 = 1'b1;
+`endif
+
+wire        board_loaded = rom_loaded & (&ps_ready) & sram_ready_96;
 
 cave68000_mem #(.AW(SDR_AW)) u_board (
     .clk        (clk),      .rst     (board_rst),
     .clk_cpu    (clk_cpu),  .rst_cpu (rst_cpu),
     .clk_vid    (clk_vid),  .rst_vid (rst_vid),
     .rom_loaded (board_loaded),
-    .game       ({1'b0, game}),
+    .game       (game),
 
     .p1         (in_p1),    .p2      (in_p2),
     .coin       (in_coin),  .start   (in_start),
@@ -923,6 +966,9 @@ cave68000_mem #(.AW(SDR_AW)) u_board (
     .row_ack    (row_ack),  .row_rdata (row_rdata),
 
     .dl_wr      (dl_wr),    .dl_addr (dl_addr), .dl_data (dl_data),
+
+    .xram_rd    (xram_rd),  .xram_wr (xram_wr), .xram_addr (xram_addr),
+    .xram_mask  (xram_mask), .xram_din (xram_din), .xram_dout (xram_dout),
 
     .nv_addr    (nv_addr),  .nv_din  (nv_din),  .nv_we   (nv_we),
     .nv_dout    (nv_dout),  .nv_dirty(nv_dirty), .nv_dirty_clr (nv_dirty_clr),
@@ -956,7 +1002,8 @@ cave68000_mem #(.AW(SDR_AW)) u_board (
 //   4 rom_loaded            5 loader FIFO overflowed (should stay red)
 //   6 board in reset        7 SDRAM read-back of words 0-3 == what was written
 //   8 overlay option on     9 blinks about once a second (frame counter)
-//   10-12 game id
+//   10-12 game id, its low three bits (Air Gallet 1, Sailor Moon 2 on the
+//      Z80 bitstream, whose counter 4 starts 2)
 //   13 frame buffer chip 0 ready and its latencies measured (red: the
 //      measurement failed, or it never came up)
 //   14 the same for chip 1
@@ -977,11 +1024,13 @@ cave68000_mem #(.AW(SDR_AW)) u_board (
 //   3 high half: frame buffer rows written in the last frame; low: rows read
 //   4 the main bitstream: the longest sprite draw, a page swap to the last
 //     row written after it, clocks of 96 MHz (a frame is 1,671,168).
-//     DonPachi's (CAVE_OKI): the sound – first digit 1, the next three the
-//     sample lines read from the SDRAM in the last frame (port 1, held at
-//     FFF), low half the loudest sample out of the board (|snd|) since the
+//     DonPachi's (CAVE_OKI) and Air Gallet's and Sailor Moon's (CAVE_Z80):
+//     the sound – first digit 1 (DonPachi's) or 2 (the Z80's), the next
+//     three the reads made on the sound ROM port in the last frame (port 1,
+//     held at FFF; the Z80's cache fills and the OKIs' samples together),
+//     low half the loudest sample out of the board (|snd|) since the
 //     overlay was turned off. The sound counter in the main bitstream left
-//     it short of timing on every seed tried, so it is DonPachi's alone.
+//     it short of timing on every seed tried, so it is not in that one.
 //   5 high half: times the Pocket's menu was opened (APF's OS notify, host
 //     command 0x00B0), since the core started; low half: sprite tile lines
 //     read from the SDRAM in the last frame
@@ -1013,7 +1062,7 @@ reg  [2:0]  vb_s    = 3'd0;                 // vblank, into clk
 reg  [7:0]  frame   = 8'd0;
 reg  [15:0] rows_w_at = 16'd0, rows_r_at = 16'd0, rows_w_f = 16'd0, rows_r_f = 16'd0;
 reg  [15:0] lines_f = 16'd0, lines_n = 16'd0;
-`ifdef CAVE_OKI
+`ifdef CORE_SND_DIAG
 reg  [11:0] snd_lines_f = 12'd0, snd_lines_n = 12'd0;
 `else
 reg  [2:0]  swap_s  = 3'd0;                 // the page swap (clk_cpu, aligned)
@@ -1032,7 +1081,7 @@ always @(posedge clk) begin
     vb_s   <= {vb_s[1:0], vblank_b};
     late_q <= snd_overrun;
     req_q  <= rom_req;
-`ifndef CAVE_OKI
+`ifndef CORE_SND_DIAG
     swap_s <= {swap_s[1:0], spr_swap};
 `endif
 
@@ -1044,7 +1093,7 @@ always @(posedge clk) begin
     if (board_rst || diag_clr) begin
         w_layer <= 16'd0; w_prog <= 16'd0; w_spr <= 16'd0;
         f_late <= 1'b0;
-`ifndef CAVE_OKI
+`ifndef CORE_SND_DIAG
         draw_max <= 32'd0;
 `endif
     end else begin
@@ -1054,12 +1103,12 @@ always @(posedge clk) begin
         for (p = 5; p <= 6; p = p + 1)
             if (rom_req[p] && w_cnt[p] > w_spr) w_spr <= w_cnt[p];
         if (late_q) f_late <= 1'b1;
-`ifndef CAVE_OKI
+`ifndef CORE_SND_DIAG
         if (draw_t > draw_max) draw_max <= draw_t;
 `endif
     end
 
-`ifndef CAVE_OKI
+`ifndef CORE_SND_DIAG
     // the sprite draw: the time from a swap to the last row written after it
     if (swap_s[1] && !swap_s[2])        since_swap <= 32'd0;
     else if (since_swap != 32'hFFFF_FFFF) since_swap <= since_swap + 32'd1;
@@ -1069,7 +1118,7 @@ always @(posedge clk) begin
 
     // tile lines read, sprites' and samples', counted by frame
     lines_n <= lines_n + {15'd0, rom_req[5] & ~req_q[5]} + {15'd0, rom_req[6] & ~req_q[6]};
-`ifdef CAVE_OKI
+`ifdef CORE_SND_DIAG
     if (rom_req[1] && !req_q[1] && snd_lines_n != 12'hFFF) snd_lines_n <= snd_lines_n + 12'd1;
 `endif
 
@@ -1089,7 +1138,7 @@ always @(posedge clk) begin
         rows_r_at <= fb_rows_read;
         lines_f   <= lines_n;
         lines_n   <= {15'd0, rom_req[5] & ~req_q[5]} + {15'd0, rom_req[6] & ~req_q[6]};
-`ifdef CAVE_OKI
+`ifdef CORE_SND_DIAG
         snd_lines_f <= snd_lines_n;
         snd_lines_n <= {11'd0, rom_req[1] & ~req_q[1]};
 `endif
@@ -1139,14 +1188,18 @@ always @(posedge clk_cpu) begin
     if (rst_cpu || diag_clr_cpu) cw_max <= 32'd0;
 end
 
-`ifdef CAVE_OKI
+`ifdef CORE_SND_DIAG
 // The loudest sample out of the board since the overlay was turned off.
 wire [15:0] snd_abs = snd[15] ? (~snd + 16'd1) : snd;
 reg  [15:0] snd_peak = 16'd0;
 always @(posedge clk_cpu)
     if (rst_cpu || diag_clr_cpu)           snd_peak <= 16'd0;
     else if (snd_sample && snd_abs > snd_peak) snd_peak <= snd_abs;
+`ifdef CAVE_OKI
 wire [31:0] diag_c4 = {4'd1, snd_lines_f, snd_peak};
+`else
+wire [31:0] diag_c4 = {4'd2, snd_lines_f, snd_peak};
+`endif
 `else
 wire [31:0] diag_c4 = draw_max;
 `endif
@@ -1161,7 +1214,7 @@ end
 
 wire [63:0] exp_line = {exp_w3, exp_w2, exp_w1, exp_w0};
 wire [15:0] diag_flags = {f_late, ps_ready[1] & ~ps_fail[1], ps_ready[0] & ~ps_fail[0],
-                          game, frame[5], diag_opt,
+                          game[2:0], frame[5], diag_opt,
                           (rb_line == exp_line), board_rst, ldr_overflow, rom_loaded,
                           allcomplete_s, reset_n_96, mem_ready_96, both_96};
 wire [255:0] diag_cnt = {cw_max, cw_f,
@@ -1204,13 +1257,13 @@ assign {mr, mg, mb} = inmenu_vid ? 24'd0 : {dr, dg, db};
 // ================================================================== video
 //
 // The scaler mode by game (video.json): 0 the board's 320 x 240 as it is,
-// for Uo Poko; 1 the same turned for the vertical games (DoDonPachi, ESP
-// Ra.De., Guwange, Fever SOS); 2 the 320 x 224 picture of Gaia Crusaders
-// and Thunder Heroes.
-wire [2:0] game_v;
-pocket_sync_bus #(.W(3)) s_game_v (.clk (clk_vid), .d (game), .q (game_v));
-wire [2:0] scaler_slot = (game_v == 3'd6) ? 3'd2 :
-                         (game_v == 3'd4) ? 3'd0 : 3'd1;
+// for Uo Poko and Sailor Moon; 1 the same turned for the vertical games
+// (DoDonPachi, DonPachi, ESP Ra.De., Guwange, Fever SOS, Air Gallet); 2 the
+// 320 x 224 picture of Gaia Crusaders and Thunder Heroes.
+wire [3:0] game_v;
+pocket_sync_bus #(.W(4)) s_game_v (.clk (clk_vid), .d (game), .q (game_v));
+wire [2:0] scaler_slot = (game_v == 4'd6) ? 3'd2 :
+                         (game_v == 4'd4 || game_v == 4'd10) ? 3'd0 : 3'd1;
 
 assign video_rgb_clock    = clk_pix;
 assign video_rgb_clock_90 = clk_pix90;
@@ -1243,7 +1296,7 @@ pocket_video u_video (
 // each new sample across through a small dcfifo.
 wire signed [15:0] snd48;
 reg  rate16m = 1'b0;
-always @(posedge clk_cpu) rate16m <= (game == 3'd6);
+always @(posedge clk_cpu) rate16m <= (game == 4'd6);
 
 pocket_audio_resample u_resample (
     .clk        (clk_cpu),

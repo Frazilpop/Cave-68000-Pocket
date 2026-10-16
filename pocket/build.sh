@@ -8,6 +8,12 @@
 #                              OKI M6295s in place of the YMZ280B (CAVE_OKI),
 #                              as the revision ap_core_oki – ap_core.qsf with
 #                              the macro added, written here each time
+#   pocket/build.sh --z80      Air Gallet's and Sailor Moon's: the Z80 sound
+#                              board (CAVE_Z80), the revision ap_core_z80
+#
+# The fitter's seed is ap_core.qsf's for the main revision; each of the other
+# two has its own below (rev_seed), the one that met timing for its sources,
+# so that this script rebuilds the bitstream bitstreams.txt records.
 #
 # Runs Quartus Prime Lite 21.1 in Docker (raetro/quartus:21.1, linux/amd64),
 # here under Colima with Rosetta. The WHOLE repository is mounted, because the
@@ -22,7 +28,8 @@
 # Afterwards: the fit and the worst slack per clock are printed, and only if
 # every clock meets timing is the bit-reversed bitstream the Pocket loads
 # written to pocket/dist/Cores/frazilpop.Cave 68000/bitstream.rbf_r (with
-# --oki, donpachi.rbf_r, which DonPachi's instance JSONs select). On negative
+# --oki, donpachi.rbf_r, which DonPachi's instance JSONs select; with --z80,
+# agallet.rbf_r, Air Gallet's and Sailor Moon's). On negative
 # slack the script fails and leaves dist alone; the bitstream it made is kept
 # as build/pocket/quartus/<name>.failed for a look. A bitstream that met
 # timing is recorded in build/pocket/bitstreams.txt (SHA-256, name, the
@@ -40,11 +47,13 @@ dist="$repo/pocket/dist/Cores/frazilpop.Cave 68000"
 image=raetro/quartus:21.1
 
 clean=0 rev=ap_core out_name=bitstream.rbf_r
+rev_seed=
 for arg in "$@"; do
     case "$arg" in
         --clean) clean=1 ;;
-        --oki) rev=ap_core_oki out_name=donpachi.rbf_r ;;
-        -h|--help) sed -n '2,20p' "$0"; exit 0 ;;
+        --oki) rev=ap_core_oki out_name=donpachi.rbf_r rev_seed=5 ;;
+        --z80) rev=ap_core_z80 out_name=agallet.rbf_r rev_seed=5 ;;
+        -h|--help) sed -n '2,22p' "$0"; exit 0 ;;
         *) echo "build.sh: unknown argument '$arg'" >&2; exit 2 ;;
     esac
 done
@@ -99,16 +108,20 @@ for m in microrom.mem nanorom.mem; do
     [ -e "$fpga/$m" ] || ln -s "../../../third_party/fx68k/hdl/$m" "$fpga/$m"
 done
 
-if [ "$rev" = ap_core_oki ]; then
+if [ "$rev" != ap_core ]; then
     # Quartus adds the revision to ap_core.qpf, first, which would make it the
     # project's default; the file is put back as it was afterwards
     cp "$fpga/ap_core.qpf" "$qb/ap_core.qpf.keep"
     trap 'cp "$qb/ap_core.qpf.keep" "$fpga/ap_core.qpf"; rm -rf "$lock"' EXIT INT TERM
-    { cat "$fpga/ap_core.qsf"
+    case "$rev" in
+        ap_core_oki) what="DonPachi's bitstream" flag=--oki macro=CAVE_OKI ;;
+        ap_core_z80) what="Air Gallet's and Sailor Moon's bitstream" flag=--z80 macro=CAVE_Z80 ;;
+    esac
+    { sed "s/^set_global_assignment -name SEED .*/set_global_assignment -name SEED $rev_seed/" "$fpga/ap_core.qsf"
       echo
-      echo "# DonPachi's bitstream (pocket/build.sh --oki writes this file from ap_core.qsf)"
-      echo 'set_global_assignment -name VERILOG_MACRO "CAVE_OKI=1"'
-    } > "$fpga/ap_core_oki.qsf"
+      echo "# $what (pocket/build.sh $flag writes this file from ap_core.qsf)"
+      echo "set_global_assignment -name VERILOG_MACRO \"$macro=1\""
+    } > "$fpga/$rev.qsf"
 fi
 
 if [ "$clean" = 1 ]; then
@@ -125,7 +138,7 @@ src=$(git -C "$repo" rev-parse --short HEAD)
 
 log=$qb/compile.log
 [ "$rev" = ap_core ] || log=$qb/compile_$rev.log
-echo "== Quartus 21.1 ($image), revision $rev"
+echo "== Quartus 21.1 ($image), revision $rev${rev_seed:+, seed $rev_seed}"
 echo "   log: $log"
 start=$(date +%s)
 if ! docker run --rm --platform linux/amd64 \
