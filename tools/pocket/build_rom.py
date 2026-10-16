@@ -15,7 +15,10 @@ layer 1, layer 2, sprites – so every region starts where upstream's
 CaveGameConfig expects it and the board's tables are untouched. DonPachi is
 the exception: its second OKI's samples are MAME's whole 3 MB region and the
 NMK112's fold of it (below), where upstream's MRA has 1 MB, so its layers and
-sprites start later and CaveGameConfig's entry for it says where. One file per
+sprites start later and CaveGameConfig's entry for it says where. Air Gallet
+and Sailor Moon (game ids 9 and 10, the Z80 board) had no MRA upstream: their
+images follow the same order with the sound CPU's program after the EEPROM
+(below), and CaveGameConfig's entries for them are this file's. One file per
 set, no gaps, the size the regions add up to. The Pocket loads the file at
 bridge address 0 and the shell writes byte n to SDRAM byte n.
 
@@ -31,6 +34,24 @@ Byte order within a region is the MRA's, which is how the board reads it:
             64 pages of 64 KB, and MAME maps pages 48-63 of a 48-page region
             onto 32-47 (map_non_power_of_two), so the image holds all 64 and
             the board reads page * 64 KB straight through
+  Air Gallet and Sailor Moon
+            program   MAME's whole 4 MB maincpu region: the word-swapped
+                      512 KB program at 0, Sailor Moon's 2 MB data ROM at
+                      0x200000 (also word-swapped), zeros between, so a 68000
+                      address is its image offset
+            z80       the sound CPU's 512 KB ROM as it is
+            oki0/1    the two OKIs' 2 MB regions as MAME has them (Sailor
+                      Moon's second, 512 KB, there four times: ROM_RELOAD)
+            layer2    6-bit tiles: MAME keeps four bits a pixel in the first
+                      half of the region and two in the second, unpacked at
+                      start-up (sailormn_unpack_tiles); the image holds them
+                      as 8x8 tiles in the 8bpp layout the layer processor
+                      already decodes, a pixel v as {v[5:4], 00, v[3:0]}
+                      (its 6bpp format keeps bits 7:6 and 3:0). That is
+                      MAME's first-half bytes interleaved with its unpacked
+                      second-half bytes shifted, see board_6bpp().
+            sprites   the files as they are; Sailor Moon's decrypted as
+                      MAME does at start-up (sailormn_decrypt_cb)
   sprites   the files as they are – ddonpach's are NOT word-swapped the way
             MAME's ROM_LOAD16_WORD_SWAP leaves its region; esprade's and
             guwange's pairs are byte-interleaved (file A on even bytes, file
@@ -69,7 +90,7 @@ import zlib
 # --------------------------------------------------------------------- layout
 # The regions in the image's order. A set without one (gaia and theroes have
 # no EEPROM; uopoko has one layer, feversos two) simply skips it.
-LAYOUT_ORDER = ["prog", "eeprom", "ymz", "oki0", "oki1", "layer0", "layer1", "layer2", "sprites"]
+LAYOUT_ORDER = ["prog", "eeprom", "z80", "ymz", "oki0", "oki1", "layer0", "layer1", "layer2", "sprites"]
 
 # Where upstream's CaveGameConfig expects each region, by game id: checked
 # against the packing when an image is built, so a wrong size cannot pass.
@@ -82,6 +103,10 @@ OFFSETS = {
     6: {"ymz": 0x0100000, "layer0": 0x0d00000, "layer1": 0x1100000, "layer2": 0x1500000, "sprites": 0x1900000},  # gaia
     2: {"eeprom": 0x0080000, "oki0": 0x0080080, "oki1": 0x0280080,                                               # donpachi
         "layer0": 0x0680080, "layer1": 0x0780080, "layer2": 0x0880080, "sprites": 0x08c0080},
+    9: {"eeprom": 0x0400000, "z80": 0x0400080, "oki0": 0x0480080, "oki1": 0x0680080,                          # agallet
+        "layer0": 0x0880080, "layer1": 0x0980080, "layer2": 0x0b80080, "sprites": 0x0f80080},
+    10: {"eeprom": 0x0400000, "z80": 0x0400080, "oki0": 0x0480080, "oki1": 0x0680080,                         # sailormn
+         "layer0": 0x0880080, "layer1": 0x0a80080, "layer2": 0x0c80080, "sprites": 0x2080080},
 }
 
 # ------------------------------------------------------------------ ROM_START
@@ -224,6 +249,123 @@ def _donpachi(prog, text, eeprom="eeprom-donpachi.bin"):
     }
 
 
+# Air Gallet: the Z80 board – a Z80 with a YM2151 and two OKI M6295s – two
+# 4bpp layers and a 6-bit one, 4bpp zoomed sprites. Every region of the
+# twelve sets is the same but the program (two versions) and the factory
+# EEPROM (six regions). The first layer's and the 6-bit layer's two-bit
+# ROMs are loaded with ROM_CONTINUE over themselves: only their second
+# megabyte is in MAME's region.
+def _agallet(prog, eeprom):
+    return {
+        "prog": (0x400000, [W(prog[0], prog[1], 0, 0x080000)]),
+        "eeprom": _eeprom(*eeprom),
+        "z80": (0x080000, [L("bp962a.u9", 0x06caddbe, 0, 0x080000)]),
+        "oki0": (0x200000, [L("bp962a.u48", 0xae00a1ce, 0, 0x200000)]),
+        "oki1": (0x200000, [L("bp962a.u47", 0x6d4e9737, 0, 0x200000)]),
+        "layer0": (0x100000, [P("bp962a.u53", 0xfcd9a107, 0, 0x200000, 0x100000, 0x100000)]),
+        "layer1": (0x200000, [L("bp962a.u54", 0x0cfa3409, 0, 0x200000)]),
+        "layer2": (0x400000, [L("bp962a.u57", 0x6d608957, 0x000000, 0x200000),
+                              P("bp962a.u65", 0x135fcf9a, 0x200000, 0x200000, 0x100000, 0x100000)]),
+        "sprites": (0x400000, [L("bp962a.u76", 0x858da439, 0x000000, 0x200000),
+                               L("bp962a.u77", 0xea2ba35e, 0x200000, 0x200000)]),
+    }
+
+
+# Sailor Moon: Air Gallet's board with a 2 MB data ROM beside the program, a
+# 20 MB 6-bit layer whose lower 2 MB of tiles the game banks, and encrypted
+# sprites. Three program versions, six EEPROMs.
+def _sailormn(prog, eeprom):
+    return {
+        "prog": (0x400000, [W(prog[0], prog[1], 0x000000, 0x080000),
+                            W("bpsm.u46", 0x32084e80, 0x200000, 0x200000)]),
+        "eeprom": _eeprom(*eeprom),
+        "z80": (0x080000, [L("bpsm945a.u9", 0x438de548, 0, 0x080000)]),
+        "oki0": (0x200000, [L("bpsm.u48", 0x498e4ed1, 0, 0x200000)]),
+        "oki1": (0x200000, [L("bpsm.u47", 0x0f2901b9, 0x000000, 0x080000),
+                            L("bpsm.u47", 0x0f2901b9, 0x080000, 0x080000),
+                            L("bpsm.u47", 0x0f2901b9, 0x100000, 0x080000),
+                            L("bpsm.u47", 0x0f2901b9, 0x180000, 0x080000)]),
+        "layer0": (0x200000, [L("bpsm.u53", 0xb9b15f83, 0, 0x200000)]),
+        "layer1": (0x200000, [L("bpsm.u54", 0x8f00679d, 0, 0x200000)]),
+        "layer2": (0x1400000, [L("bpsm.u57", 0x86be7b63, 0x000000, 0x200000),
+                               L("bpsm.u58", 0xe0bba83b, 0x200000, 0x200000),
+                               L("bpsm.u62", 0xa1e3bfac, 0x400000, 0x200000),
+                               L("bpsm.u61", 0x6a014b52, 0x600000, 0x200000),
+                               L("bpsm.u60", 0x992468c0, 0x800000, 0x200000),
+                               L("bpsm.u65", 0xf60fb7b5, 0xa00000, 0x200000),
+                               L("bpsm.u64", 0x6559d31c, 0xc00000, 0x200000),
+                               P("bpsm.u63", 0xd57a56b4, 0xe00000, 0x200000, 0x100000, 0x100000)]),
+        "sprites": (0x400000, [L("bpsm.u76", 0xa243a5ba, 0x000000, 0x200000),
+                               L("bpsm.u77", 0x5179a4ac, 0x200000, 0x200000)]),
+    }
+
+
+# What MAME does to a region at start-up (init_agallet, init_sailormn), by
+# game id: the 6-bit layer's two-bit half unpacked, Sailor Moon's sprites
+# decrypted. build_regions() applies these, then board_form().
+def unpack_6bpp(rgn):
+    """sailormn_unpack_tiles: the two-bit pairs in the region's third quarter
+    spread over its second half, one pair in the low two bits of a nibble."""
+    n = len(rgn)
+    half, quarter = n // 2, n // 4
+    src = bytes(rgn[half:half + quarter])
+    lo = bytes(((d & 0x03) << 4) | ((d & 0x0c) >> 2) for d in range(256))
+    hi = bytes((d & 0x30) | ((d & 0xc0) >> 6) for d in range(256))
+    out = bytearray(rgn)
+    out[half::2] = src.translate(lo)
+    out[half + 1::2] = src.translate(hi)
+    return out
+
+
+SAILORMN_SPRITE_BITS = (15, 10, 12, 6, 11, 1, 13, 3, 16, 17, 2, 5, 14, 7, 18, 8, 4, 19, 9, 0)
+
+
+def decrypt_sailormn_sprites(src):
+    """sailormn_decrypt_cb: out[i ^ 0x950c4] = src[bitswap(i)], the bitswap
+    moving address bits 19..0 (bits 23..20 stay)."""
+    def table(shift):
+        t = []
+        for v in range(1024):
+            a = 0
+            for k, b in enumerate(SAILORMN_SPRITE_BITS):     # result bit 19 - k <- bit b
+                if ((v << shift) >> b) & 1:
+                    a |= 1 << (19 - k)
+            t.append(a)
+        return t
+    t_lo, t_hi = table(0), table(10)
+    n = len(src)
+    out = bytearray(n)
+    for i in range(n):
+        out[i ^ 0x950c4] = src[(i & ~0xfffff) | t_hi[(i >> 10) & 0x3ff] | t_lo[i & 0x3ff]]
+    return out
+
+
+MAME_INIT = {
+    9: {"layer2": unpack_6bpp},
+    10: {"layer2": unpack_6bpp, "sprites": decrypt_sailormn_sprites},
+}
+
+
+def board_6bpp(rgn):
+    """MAME's (unpacked) 6-bit layer region as the board's 8bpp-layout tiles.
+    MAME's layout_8x8x6_2 takes a pixel's low four bits from the first half
+    (packed, MSB first: pixel 0 the high nibble) and its top two from the low
+    two bits of the same nibble in the second half. layout_8x8x8, which the
+    board decodes, puts a pixel's bits 3:0 and 7:4 in the same nibble of a
+    byte pair, 64 bytes a tile. With the pixel written {v[5:4], 00, v[3:0]},
+    each pair is MAME's first-half byte and its second-half byte with each
+    nibble's low pair moved up two bits."""
+    half = len(rgn) // 2
+    up = bytes(((d & 0x33) << 2) & 0xff for d in range(256))
+    out = bytearray(len(rgn))
+    out[0::2] = rgn[:half]
+    out[1::2] = bytes(rgn[half:]).translate(up)
+    return out
+
+
+BOARD_FORM = {9: {"layer2": board_6bpp}, 10: {"layer2": board_6bpp}}
+
+
 def _set(parent, game, regions):
     return {"parent": parent, "game": game, "regions": regions}
 
@@ -263,6 +405,25 @@ SETS = {
     "donpachikr": _set("donpachi", 2, _donpachi(("prgk.u26", 0xbbaf4c8b), ("text.u58", 0x5dba06e7))),
     "donpachihk": _set("donpachi", 2, _donpachi(("37.u29", 0x71f39f30), ("u58.bin", 0x285379ff))),
 }
+
+# Air Gallet (Europe) – MAME's parent – and the other regions, then the older
+# program's six; Sailor Moon 95/03/22B (Japan) – MAME's parent – and its
+# regions, then 95/03/22 and 95/03/21. Within a version the sets differ only
+# in the factory EEPROM.
+AGALLET_NV = [("", "europe", 0xec38bf65), ("u", "usa", 0x72e65056), ("j", "japan", 0x0753f547),
+              ("k", "korea", 0x7f41c253), ("t", "taiwan", 0x0af46742), ("h", "hongkong", 0x998d1a74)]
+SAILORMN_NV = [("j", "japan", 0xea03c30a), ("e", "europe", 0x59a7dc50), ("u", "usa", 0x3915abe3),
+               ("k", "korea", 0x0e7de398), ("t", "taiwan", 0x6c7e8c2a), ("h", "hongkong", 0x4d24c874)]
+for _v, _prog_rom in (("", ("bp962a.u45", 0x24815046)), ("a", ("u45", 0x2cab18b0))):
+    for _r, _region, _crc in AGALLET_NV:
+        SETS[f"agallet{_v}{_r}"] = _set(None if not (_v or _r) else "agallet", 9,
+                                        _agallet(_prog_rom, (f"agallet_{_region}.nv", _crc)))
+for _v, _prog_rom in (("", ("bpsm945a.u45", 0x898c9515)), ("n", ("smprg.u45", 0x234f1152)),
+                      ("o", ("smprg.u45", 0x97837ab4))):
+    for _r, _region, _crc in SAILORMN_NV:
+        _name = "sailormn" if (_v, _r) == ("", "j") else f"sailormn{_v}{_r}" if _v else f"sailormn{_r}"
+        SETS[_name] = _set(None if _name == "sailormn" else "sailormn", 10,
+                           _sailormn(_prog_rom, (f"sailormn_{_region}.nv", _crc)))
 
 
 # --------------------------------------------------------------- ROM finding
@@ -390,6 +551,14 @@ def build_regions(setname, index, log=print):
             else:
                 raise AssertionError(kind)
             log(f"    {rname:<8} {off:#09x} {kind} {name:<20} {crc:08x} <- {where}")
+        init = MAME_INIT.get(spec["game"], {}).get(rname)
+        if init:
+            buf = init(buf)
+            log(f"    {rname:<8} as MAME leaves it at start-up ({init.__name__})")
+        form = BOARD_FORM.get(spec["game"], {}).get(rname)
+        if form:
+            buf = form(buf)
+            log(f"    {rname:<8} in the board's form ({form.__name__})")
         out[rname] = bytes(buf)
     return out
 

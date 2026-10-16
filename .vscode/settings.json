@@ -20,7 +20,9 @@
   "git.ignoredRepositories": [
     "third_party/mame",
     "third_party/fx68k",
-    "third_party/pocket-utils"
+    "third_party/pocket-utils",
+    "third_party/jt51",
+    "third_party/tv80"
   ],
 
   // Keep the file watcher off vendored source, its history, and Verilator

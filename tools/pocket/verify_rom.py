@@ -22,6 +22,10 @@ then compares every region of the .rom image with MAME's:
     slice is compared through that permutation: ddonpach's bytes swapped in
     pairs; esprade's and guwange's in groups of four, image [a0 b0 a1 b1]
     against MAME's [a1 a0 b1 b0].
+  * Air Gallet's and Sailor Moon's 6-bit layer – MAME's region as it leaves
+    it at start-up (unpacked) is put in the board's form (build_rom's
+    board_6bpp) and must equal the slice; their sprites are MAME's
+    (Sailor Moon's decrypted) as they are.
   * the image must be exactly the regions' total, nothing over.
 
 Exit status 0 only if every set matches.
@@ -42,7 +46,7 @@ import build_rom  # noqa: E402  (our own module, beside this file)
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 LUA = os.path.join(REPO, "tools", "mame_cave_regions.lua")
-MAME_NAME = {"prog": "maincpu", "eeprom": "eeprom", "ymz": "ymz", "oki0": "oki1", "oki1": "oki2",
+MAME_NAME = {"prog": "maincpu", "eeprom": "eeprom", "z80": "audiocpu", "ymz": "ymz", "oki0": "oki1", "oki1": "oki2",
              "layer0": "layer0", "layer1": "layer1", "layer2": "layer2", "sprites": "sprites0"}
 
 
@@ -141,6 +145,10 @@ def verify(setname, romdir, dumpdir):
             mame = mame + mame[0x200000:]     # the NMK112's pages 48-63
         mine = to_mame_order(setname, rname, img[base:base + size])
         note = " (through the sprite permutation)" if rname == "sprites" and mine != img[base:base + size] else ""
+        form = build_rom.BOARD_FORM.get(build_rom.SETS[setname]["game"], {}).get(rname)
+        if form and len(mame) == size:
+            mame = bytes(form(mame))
+            note = f" (MAME's region in the board's form, {form.__name__})"
         if len(mame) != size:
             ok = False
             lines.append(f"  {rname:<8} @{base:#09x}  MAME's region is {len(mame):#x} bytes, the image's {size:#x}")

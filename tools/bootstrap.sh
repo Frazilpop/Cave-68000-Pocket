@@ -59,6 +59,8 @@ done
 DEPS=(
   "fx68k|jtfpga/fx68k|master|68000 main CPU|GPL-3.0-only|yes"
   "pocket-utils|agg23/analogue-pocket-utils|master|Pocket shell IP: data loader, PSRAM, I2S audio, sync FIFO|MIT|yes"
+  "jt51|jotego/jt51|master|YM2151 for the Air Gallet / Sailor Moon sound board|GPL-3.0-or-later|yes"
+  "tv80|hutch31/tv80|master|Z80 for the same board (Verilog, so Verilator runs it; T80 is VHDL)|MIT|yes"
 )
 
 # --------------------------------------------------------------------- helpers
@@ -211,7 +213,9 @@ done
 # maps, inputs and ROM sets), cave.h, cave_v.cpp (the layer mixing) and
 # sprite013 (the 013 sprite chip). The 038 tilemap chip is a device,
 # src/devices/video/tmap038; the YMZ280B, the 93C46 and the 68000 are under
-# src/devices/ too.
+# src/devices/ too, and so are the Z80 board's: the YM2151 (ymopm, on
+# 3rdparty/ymfm, which sim/ym2151 compiles in as the reference), the OKI
+# M6295, the Z80 and the sound latch.
 
 if [ "$DO_MAME" = 1 ]; then
   echo
@@ -233,6 +237,11 @@ if [ "$DO_MAME" = 1 ]; then
       '/src/devices/cpu/m68000/m68kmusashi.*' \
       '/src/devices/cpu/m68000/m68kcommon.*' \
       '/src/devices/sound/ymz280b.*' \
+      '/src/devices/sound/ymopm.*' \
+      '/src/devices/sound/okim6295.*' \
+      '/src/devices/cpu/z80/z80.*' \
+      '/src/devices/machine/gen_latch.*' \
+      '/3rdparty/ymfm/' \
       '/src/devices/machine/eepromser.*' \
       '/src/devices/machine/eeprom.*' \
       '/src/devices/machine/input_merger.*' \
