@@ -9,6 +9,12 @@
 //   * upstream's DDR.sv burst bookkeeping in front of the sprite tile and
 //     frame buffer ports (sim_ddr_port below): burstDone with the last beat,
 //     combinationally on a write as MiSTer's bridge gave it;
+//   * built with ANALOGIZER (sim/ddonpach/build.sh --anz), the shell's
+//     pocket_analogizer on the board's raster, as core_top has it (but
+//     before the overlay and the menu's black, which the harness has not
+//     got): analogizer.bin's word in as the bridge gives it, the Pocket's
+//     controls and the SNAC controllers' data lines in, the cartridge pins
+//     and the players' controls out;
 //   * the 68000's bus, taken by hierarchical reference for the trace, the
 //     sprite frame buffer's page on screen, for --replay, and the YMZ280B's
 //     68000 side and whether it is working on a sample, for --ymz-log (built
@@ -130,6 +136,21 @@ module cave68000_sim (
   output wire [7:0]  r, g, b,
   output wire [15:0] snd,
   output wire        snd_sample, snd_overrun,
+
+`ifdef ANALOGIZER
+  input  wire        anz_wr,            // a bridge write to 0xF7000000 (on clk_vid)
+  input  wire [31:0] anz_data,
+  input  wire [15:0] anz_cont1, anz_cont2,
+  input  wire [7:4]  anz_bank0_in,      // driven onto bank0 while it is an input
+  input  wire        anz_pin31_in,      // and onto pin31
+  output wire [7:0]  anz_bank3, anz_bank2, anz_bank1,
+  output wire [7:4]  anz_bank0,
+  output wire        anz_bank3_dir, anz_bank2_dir, anz_bank1_dir, anz_bank0_dir,
+  output wire        anz_pin30, anz_pin30_dir, anz_pwroff, anz_pin31_dir,
+  output wire [15:0] anz_key1, anz_key2,
+  output wire        anz_p1_snac, anz_pocket_off,
+  output wire [31:0] anz_cfg,           // the word as pocket_analogizer took it
+`endif
 
   // the 68000's bus
   output wire        dbg_as, dbg_rw, dbg_uds, dbg_lds, dbg_dtack,
@@ -320,6 +341,31 @@ module cave68000_sim (
   assign {dbg_oki_sv0, dbg_oki_sv1, dbg_oki_s0, dbg_oki_s1} = '0;
   assign {dbg_z80_reset, dbg_z80_cmd, dbg_z80_act, dbg_z80_acc, dbg_z80_io, dbg_z80_wr, dbg_z80_m1, dbg_z80_addr, dbg_z80_data, dbg_z80_late, dbg_z80_time} = '0;
   assign {dbg_ym_sample, dbg_ym_left, dbg_ym_right} = '0;
+`endif
+
+`ifdef ANALOGIZER
+  wire [7:0] c_b3, c_b2, c_b1;
+  wire [7:4] c_b0;
+  wire       c_p30, c_p31;
+  assign c_b0  = anz_bank0_dir ? 4'hz : anz_bank0_in;
+  assign c_p31 = anz_pin31_dir ? 1'bz : anz_pin31_in;
+  pocket_analogizer u_anz (
+    .clk_74a (clk_vid), .bridge_wr (anz_wr), .bridge_addr (32'hF7000000), .bridge_wr_data (anz_data),
+    .clk_vid (clk_vid), .ce_pix (ce_pix), .hs (hs), .vs (vs),
+    .hblank (hblank), .vblank (vblank), .de (de), .r (r), .g (g), .b (b),
+    .pocket_off (anz_pocket_off),
+    .cont1_key (anz_cont1), .cont2_key (anz_cont2),
+    .key1 (anz_key1), .key2 (anz_key2), .p1_snac (anz_p1_snac),
+    .cart_tran_bank2 (c_b2), .cart_tran_bank2_dir (anz_bank2_dir),
+    .cart_tran_bank3 (c_b3), .cart_tran_bank3_dir (anz_bank3_dir),
+    .cart_tran_bank1 (c_b1), .cart_tran_bank1_dir (anz_bank1_dir),
+    .cart_tran_bank0 (c_b0), .cart_tran_bank0_dir (anz_bank0_dir),
+    .cart_tran_pin30 (c_p30), .cart_tran_pin30_dir (anz_pin30_dir),
+    .cart_pin30_pwroff_reset (anz_pwroff),
+    .cart_tran_pin31 (c_p31), .cart_tran_pin31_dir (anz_pin31_dir)
+  );
+  assign {anz_bank3, anz_bank2, anz_bank1, anz_bank0, anz_pin30} = {c_b3, c_b2, c_b1, c_b0, c_p30};
+  assign anz_cfg = u_anz.cfg_74;
 `endif
 endmodule
 

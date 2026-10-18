@@ -748,6 +748,8 @@ set_global_assignment -name SYSTEMVERILOG_FILE core/pocket_video.sv
 set_global_assignment -name SYSTEMVERILOG_FILE core/pocket_diag.sv
 set_global_assignment -name SYSTEMVERILOG_FILE core/pocket_nvram.sv
 set_global_assignment -name SYSTEMVERILOG_FILE core/pocket_audio_resample.sv
+set_global_assignment -name SYSTEMVERILOG_FILE core/pocket_analogizer.sv
+set_global_assignment -name QIP_FILE analogizer/analogizer.qip
 # core/core_constraints.sdc is NOT listed: apf/apf_constraints.sdc reads it
 # after derive_pll_clocks, and listing it here as well would apply it twice.
 
