@@ -52,7 +52,7 @@ for arg in "$@"; do
     case "$arg" in
         --clean) clean=1 ;;
         --oki) rev=ap_core_oki out_name=donpachi.rbf_r rev_seed=5 ;;
-        --z80) rev=ap_core_z80 out_name=agallet.rbf_r rev_seed=3 ;;
+        --z80) rev=ap_core_z80 out_name=agallet.rbf_r rev_seed=6 ;;
         -h|--help) sed -n '2,22p' "$0"; exit 0 ;;
         *) echo "build.sh: unknown argument '$arg'" >&2; exit 2 ;;
     esac
