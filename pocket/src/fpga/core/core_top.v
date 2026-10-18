@@ -696,10 +696,15 @@ localparam [15:0] DSW = 16'hfffb;
 //
 // In Tate the Pocket is held on its side, so the D-pad is turned to the
 // game's directions: with the Pocket turned left (anticlockwise) its right
-// is the game's up, with it turned right its left is.
+// is the game's up, with it turned right its left is. Only the Pocket's own
+// controls turn (type 1 in cont1_key[31:28]): a Dock's controller is not
+// turned with the screen, and in Tate its TV is the one on its side, as an
+// arcade monitor is, so its D-pad is the game's as it stands.
 wire [15:0] k1, k2;
 synch_3 #(.WIDTH(16)) s_k1 (.i(cont1_key[15:0]), .o(k1), .clk(clk_cpu), .rise(), .fall());
 synch_3 #(.WIDTH(16)) s_k2 (.i(cont2_key[15:0]), .o(k2), .clk(clk_cpu), .rise(), .fall());
+wire       k1_pocket;
+synch_3 s_k1_type (.i(cont1_key[31:28] == 4'h1), .o(k1_pocket), .clk(clk_cpu), .rise(), .fall());
 
 wire [1:0] rot_cpu;
 pocket_sync_bus #(.W(2)) s_rot_cpu (.clk (clk_cpu), .d (rot_74), .q (rot_cpu));
@@ -713,13 +718,13 @@ function [3:0] dpad_turn(input [3:0] d, input [1:0] rot);
     default: dpad_turn = d;
     endcase
 endfunction
-wire [1:0] rot_in = vert_cpu ? rot_cpu : 2'd0;
+wire [1:0] rot_in = vert_cpu && k1_pocket ? rot_cpu : 2'd0;
 
 reg  [1:0] rapid    = 2'b11;                //   {p2, p1}: the rapid press's phase
 wire [1:0] rapid_b1 = {k2[9], k1[9]} & rapid;
 
 wire [7:0] in_p1    = {k1[7:4] | {3'd0, rapid_b1[0]}, dpad_turn(k1[3:0], rot_in)};
-wire [7:0] in_p2    = {k2[7:4] | {3'd0, rapid_b1[1]}, dpad_turn(k2[3:0], rot_in)};
+wire [7:0] in_p2    = {k2[7:4] | {3'd0, rapid_b1[1]}, k2[3:0]};
 wire [1:0] in_coin  = {k2[14], k1[14]};
 wire [1:0] in_start = {k2[15], k1[15]};
 
