@@ -423,6 +423,14 @@ wire [31:0] nv_bridge_rd;
 //                      them), and gaia's and theroes's DSW word is 0xfffb.
 //   0xF100000C         write: reset the game (1 ms)
 //   0xF1000014 [0]     diagnostic overlay (pocket_diag), see DIAGNOSTICS
+//   0xF1000018 [1:0]   Screen Rotation, for the vertical games (MAME's
+//                      ROT270 sets; the ROT0 ones ignore it): 0 Upright, the
+//                      picture turned to stand on the Pocket held as it is;
+//                      1 Tate (left), the board's picture as it is, full
+//                      width, the Pocket turned a quarter anticlockwise;
+//                      2 Tate (right), the same turned half round, the Pocket
+//                      turned a quarter clockwise. The scaler mode (video,
+//                      below) and the D-pad (inputs) both follow it.
 
 reg  [3:0]  game_74  = 4'd0;
 wire        osnotify_inmenu;                //   APF's menu open (core_bridge_cmd, clk_74a)
@@ -430,6 +438,7 @@ reg         test_pend = 1'b0;               //   a press waiting for the menu to
 reg  [16:0] test_cnt  = 17'd0;              //   1 ms, as the reset
 wire        test_74  = (test_cnt != 17'd0);
 reg         diag_74  = 1'b0;
+reg  [1:0]  rot_74   = 2'd0;
 reg  [16:0] hrst_cnt = 17'd0;               //   1 ms at 74.25 MHz = 74,250
 wire        hrst_74  = (hrst_cnt != 17'd0);
 
@@ -450,6 +459,7 @@ always @(posedge clk_74a) begin
         32'hF1000000: if (bridge_wr_data[0]) test_pend <= 1'b1;
         32'hF100000C: hrst_cnt <= 17'd74250;
         32'hF1000014: diag_74  <= bridge_wr_data[0];
+        32'hF1000018: rot_74   <= bridge_wr_data[1:0];
         default: ;
         endcase
     end
@@ -460,6 +470,7 @@ always @(posedge clk_74a) begin
     32'h2???????: bridge_rd_data <= nv_bridge_rd;
     32'hF0000000: bridge_rd_data <= {28'd0, game_74};
     32'hF1000014: bridge_rd_data <= {31'd0, diag_74};
+    32'hF1000018: bridge_rd_data <= {30'd0, rot_74};
     32'hF8??????: bridge_rd_data <= cmd_bridge_rd_data;
     default:      bridge_rd_data <= 32'd0;
     endcase
@@ -682,15 +693,33 @@ localparam [15:0] DSW = 16'hfffb;
 // frames on and two off. A wins: button 1 is A or the rapid press, so A and
 // R together are the button held. The phase rests pressed while R is up, so
 // R fires on the frame it is pressed.
+//
+// In Tate the Pocket is held on its side, so the D-pad is turned to the
+// game's directions: with the Pocket turned left (anticlockwise) its right
+// is the game's up, with it turned right its left is.
 wire [15:0] k1, k2;
 synch_3 #(.WIDTH(16)) s_k1 (.i(cont1_key[15:0]), .o(k1), .clk(clk_cpu), .rise(), .fall());
 synch_3 #(.WIDTH(16)) s_k2 (.i(cont2_key[15:0]), .o(k2), .clk(clk_cpu), .rise(), .fall());
 
+wire [1:0] rot_cpu;
+pocket_sync_bus #(.W(2)) s_rot_cpu (.clk (clk_cpu), .d (rot_74), .q (rot_cpu));
+wire       vert_cpu = !(game == 4'd4 || game == 4'd6 || game == 4'd10);
+
+//                       {right, left, down, up}
+function [3:0] dpad_turn(input [3:0] d, input [1:0] rot);
+    case (rot)
+    2'd1:    dpad_turn = {d[1], d[0], d[2], d[3]};   // Tate (left)
+    2'd2:    dpad_turn = {d[0], d[1], d[3], d[2]};   // Tate (right)
+    default: dpad_turn = d;
+    endcase
+endfunction
+wire [1:0] rot_in = vert_cpu ? rot_cpu : 2'd0;
+
 reg  [1:0] rapid    = 2'b11;                //   {p2, p1}: the rapid press's phase
 wire [1:0] rapid_b1 = {k2[9], k1[9]} & rapid;
 
-wire [7:0] in_p1    = k1[7:0] | {3'd0, rapid_b1[0], 4'd0};
-wire [7:0] in_p2    = k2[7:0] | {3'd0, rapid_b1[1], 4'd0};
+wire [7:0] in_p1    = {k1[7:4] | {3'd0, rapid_b1[0]}, dpad_turn(k1[3:0], rot_in)};
+wire [7:0] in_p2    = {k2[7:4] | {3'd0, rapid_b1[1]}, dpad_turn(k2[3:0], rot_in)};
 wire [1:0] in_coin  = {k2[14], k1[14]};
 wire [1:0] in_start = {k2[15], k1[15]};
 
@@ -1259,11 +1288,17 @@ assign {mr, mg, mb} = inmenu_vid ? 24'd0 : {dr, dg, db};
 // The scaler mode by game (video.json): 0 the board's 320 x 240 as it is,
 // for Uo Poko and Sailor Moon; 1 the same turned for the vertical games
 // (DoDonPachi, DonPachi, ESP Ra.De., Guwange, Fever SOS, Air Gallet); 2 the
-// 320 x 224 picture of Gaia Crusaders and Thunder Heroes.
+// 320 x 224 picture of Gaia Crusaders and Thunder Heroes. Screen Rotation
+// takes the vertical games to 0 for Tate (left) and 3, the picture turned
+// half round, for Tate (right).
 wire [3:0] game_v;
+wire [1:0] rot_v;
 pocket_sync_bus #(.W(4)) s_game_v (.clk (clk_vid), .d (game), .q (game_v));
+pocket_sync_bus #(.W(2)) s_rot_v  (.clk (clk_vid), .d (rot_74), .q (rot_v));
 wire [2:0] scaler_slot = (game_v == 4'd6) ? 3'd2 :
-                         (game_v == 4'd4 || game_v == 4'd10) ? 3'd0 : 3'd1;
+                         (game_v == 4'd4 || game_v == 4'd10) ? 3'd0 :
+                         (rot_v == 2'd1) ? 3'd0 :
+                         (rot_v == 2'd2) ? 3'd3 : 3'd1;
 
 assign video_rgb_clock    = clk_pix;
 assign video_rgb_clock_90 = clk_pix90;

@@ -19,6 +19,21 @@
                 "value": 1
             },
             {
+                "name": "Screen Rotation",
+                "id": 16,
+                "type": "list",
+                "enabled": true,
+                "persist": true,
+                "address": "0xF1000018",
+                "defaultval": 0,
+                "mask": "0xFFFFFFFC",
+                "options": [
+                    { "value": 0, "name": "Upright" },
+                    { "value": 1, "name": "Tate (left)" },
+                    { "value": 2, "name": "Tate (right)" }
+                ]
+            },
+            {
                 "name": "Diagnostic overlay",
                 "id": 14,
                 "type": "check",
