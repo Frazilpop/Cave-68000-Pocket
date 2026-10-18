@@ -59,8 +59,7 @@ done
 DEPS=(
   "fx68k|jtfpga/fx68k|master|68000 main CPU|GPL-3.0-only|yes"
   "pocket-utils|agg23/analogue-pocket-utils|master|Pocket shell IP: data loader, PSRAM, I2S audio, sync FIFO|MIT|yes"
-  "jt51|jotego/jt51|master|YM2151 for the Air Gallet / Sailor Moon sound board|GPL-3.0-or-later|yes"
-  "tv80|hutch31/tv80|master|Z80 for the same board (Verilog, so Verilator runs it; T80 is VHDL)|MIT|yes"
+  "jt51|jotego/jt51|master|sim/ym2151's tb_jt51 only: the YM2151 first tried, held against ymfm (nothing that ships uses it)|GPL-3.0-or-later|yes"
 )
 
 # --------------------------------------------------------------------- helpers
