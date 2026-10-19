@@ -3,11 +3,12 @@
         "magic": "APF_VER_1",
         "metadata": {
             "platform_ids": [
-                "cave68000"
+                "cave68000",
+                "analogizer"
             ],
             "shortname": "Cave 68000",
-            "description": "Eight Cave 68000 arcade games, DonPachi to Guwange",
-            "author": "frazilpop",
+            "description": "Cave 68000 arcade core",
+            "author": "Frazilpop",
             "url": "https://github.com/Frazilpop/Cave-68000-Pocket",
             "version": "1.0.0",
             "date_release": "2026-10-15"
@@ -22,7 +23,7 @@
             },
             "hardware": {
                 "link_port": false,
-                "cartridge_adapter": -1
+                "cartridge_adapter": 0
             }
         },
         "cores": [
@@ -35,6 +36,11 @@
                 "name": "donpachi",
                 "id": 1,
                 "filename": "donpachi.rbf_r"
+            },
+            {
+                "name": "agallet",
+                "id": 2,
+                "filename": "agallet.rbf_r"
             }
         ]
     }
