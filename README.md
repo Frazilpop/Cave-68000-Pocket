@@ -6,13 +6,15 @@
 Pocket!**
 
 This core recreates the board these games all run on – The Cave 68000. It
-plays eight games in total.
+plays ten games in total.
 
 ## Supported ROMs
 
 | ROM id | game | notes |
 | --- | --- | --- |
 | `donpachi` | DonPachi (1995) | The US release |
+| `sailormn` | Pretty Soldier Sailor Moon (1995) | By Gazelle. Ver. 95/03/22B, the Japanese release (Bishoujo Senshi Sailor Moon) |
+| `agallet` | Air Gallet (1996) | By Gazelle. The European release |
 | `ddonpach` | DoDonPachi (1997) | The world release |
 | `esprade` | ESP Ra.De. (1998) | The world release, the International Ver. |
 | `dfeveron` | Dangun Feveron (1998) | The Japanese release |
@@ -40,6 +42,14 @@ main games.
 | `uopokoj` | Puzzle Uo Poko (1998) | The Japanese release |
 | `guwanges` | Guwange (2000) | The 2000 Special Ver. |
 | `theroesa` | Thunder Heroes (2001) | The second set |
+| `sailormne`, `sailormnu`, `sailormnk`, `sailormnt`, `sailormnh` | Pretty Soldier Sailor Moon (1995) | Ver. 95/03/22B: the European, US, Korean, Taiwanese and Hong Kong releases |
+| `sailormnnj`, `sailormnne`, `sailormnnu`, `sailormnnk`, `sailormnnt`, `sailormnnh` | Pretty Soldier Sailor Moon (1995) | Ver. 95/03/22, in the same six regions |
+| `sailormnoj`, `sailormnoe`, `sailormnou`, `sailormnok`, `sailormnot`, `sailormnoh` | Pretty Soldier Sailor Moon (1995) | Ver. 95/03/21, in the same six regions |
+| `agalletu`, `agalletj`, `agalletk`, `agallett`, `agalleth` | Air Gallet (1996) | The US, Japanese (Akuu Gallet), Korean, Taiwanese and Hong Kong releases |
+| `agalleta`, `agalletau`, `agalletaj`, `agalletak`, `agalletat`, `agalletah` | Air Gallet (1996) | Older version, in the same six regions |
+
+Air Gallet's and Sailor Moon's regions differ only in the factory
+settings, each version is otherwise the same.
 
 ## Installation
 
@@ -88,11 +98,30 @@ or you can use a tool like Pocket Updater.
 Opening the Analogue Pocket menu will pause the game.
 
 This includes usual **Display Mode** and **Controls** entries. Under **Core
-Settings** there are three options:
+Settings** there are four options:
 
 - **Test Mode** – the arcade cabinet's operator menu, where you can set the difficulty, lives etc. Most of the games keep these settings on the SD card. Note that this is a button on the Cave 68000 and selecting this option is the equivalent of pressing this button.
 - **Reset Game**
+- **Screen Rotation** – Upright, Tate (left) or Tate (right). Tate shows the vertical games full size with the Pocket on its side.
 - **Diagnostic overlay** – probably best to ignore this
+
+## Analogizer
+
+The core supports RndMnkIII's [Analogizer](https://github.com/RndMnkIII/Analogizer),
+which plugs into the Pocket's cartridge slot. It sends the arcade board's own
+picture to a CRT or TV, and lets you play with SNAC controllers.
+
+- **Video** – the board's original 15 kHz signal as RGBS, RGsB, YPbPr or Y/C (NTSC or PAL), or 31 kHz for a VGA monitor through the scandoubler, with 0–75 % scanlines (HQ2x shows as the plain scandoubler).
+- **Controllers** – DB15, NES, SNES and PC Engine pads through a SNAC adapter, for either player. The buttons work as they do on the Pocket (on a DB15 stick, A–D are buttons 1–4 and F is rapid shot).
+- **Setup** – the core reads the shared `analogizer.bin` in `Assets/analogizer/common/`, which Pupdate or AnalogizerConfigurator writes. That file sets the video mode, the controllers and whether the Pocket's own screen stays on. Without it the core works as normal.
+
+Once an Analogizer is set up in `analogizer.bin`, the core drives the cartridge
+slot, as every Analogizer core does, so play with the adapter in the slot
+rather than a game cartridge. Without it set up, the slot's pins are left idle,
+and a cartridge left in the slot is fine. This is standard Analogizer
+functionality.
+
+Please note: The core screen rotation settings can only be used to rotate the Analogue Pocket's own screen. The majority of the games this core plays are vertical games where the monitor/CRT is designed to be placed on its side, as in the arcade. **If using an Analogizer, you will need to rotate your screen 90° counter counter-clockwise to play these games properly.**
 
 ## A note on Slowdown
 
@@ -108,14 +137,17 @@ This has been measured frame for frame in simulation.
 
 ## Technical details
 
-- The core recreates Cave's first-generation 68000 board in hardware logic, built on [nullobject's Cave MiSTer core](https://github.com/MiSTer-devel/Arcade-Cave_MiSTer) with a Pocket shell. DonPachi's sound chips have their own bitstream.
+- The core recreates Cave's first-generation 68000 board in hardware logic, built on [nullobject's Cave MiSTer core](https://github.com/MiSTer-devel/Arcade-Cave_MiSTer) with a Pocket shell. DonPachi's sound chips have their own bitstream, and so does Air Gallet and Sailor Moon's Z80 sound board.
 - It's been checked against MAME in simulation – the main processor's moves identical from power-on, MAME's pictures redrawn pixel for pixel, and the sound equal to MAME's on every sample.
-- To build it yourself: `tools/bootstrap.sh`, then `sh pocket/build.sh` and `sh pocket/build.sh --oki` for DonPachi's bitstream (Quartus Prime Lite 21.1 in Docker, about ten minutes each). The finished SD card layout can be found in `pocket/dist/`.
+- To build it yourself: `tools/bootstrap.sh`, then `sh pocket/build.sh`, `sh pocket/build.sh --oki` for DonPachi's bitstream and `sh pocket/build.sh --z80` for Air Gallet and Sailor Moon's (Quartus Prime Lite 21.1 in Docker, about ten minutes each). The finished SD card layout can be found in `pocket/dist/`.
 
 ## Credits and licence
 
 - **Josh Bassett (nullobject)** – the Cave MiSTer core this is built on, which grew from **Rick Wertenbroek**'s reverse engineering of DoDonPachi.
 - **Jorge Cwik (ijor)** – fx68k, the 68000 processor.
+- **Guy Hutchison** – TV80, the Z80 of Air Gallet and Sailor Moon's sound board, after **Daniel Wallner**'s T80.
+- **Aaron Giles** – ymfm, MAME's YM2151, whose tables the core's YM2151 uses.
+- **RndMnkIII** – the Analogizer and its adapter module, with **Mike Simone**'s Y/C encoder and **Till Harbaum**'s scandoubler from MiST.
 - **alphanu1** – the SDRAM controller.
 - **agg23** – the Pocket utilities used for loading and audio.
 - **Analogue** – the openFPGA core framework.
@@ -126,5 +158,7 @@ GPL-3.0-only. [`THIRD-PARTY.md`](THIRD-PARTY.md) lists every dependency and its
 licence.
 
 DonPachi, DoDonPachi, ESP Ra.De., Guwange, Dangun Feveron and Uo Poko are ©
-Cave, Gaia Crusaders is © Noise Factory and Thunder Heroes is © Primetek
-Investments. This project contains no game data.
+Cave, Gaia Crusaders is © Noise Factory, Thunder Heroes is © Primetek
+Investments, Air Gallet is © Banpresto and Pretty Soldier Sailor Moon is ©
+Naoko Takeuchi, Kodansha, Toei Animation and Banpresto. This project contains
+no game data.
