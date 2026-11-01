@@ -8,10 +8,10 @@
             ],
             "shortname": "Cave 68000",
             "description": "Cave 68000 arcade core",
-            "author": "Frazilpop",
+            "author": "frazilpop",
             "url": "https://github.com/Frazilpop/Cave-68000-Pocket",
-            "version": "1.1.0",
-            "date_release": "2026-10-19"
+            "version": "1.1.1",
+            "date_release": "2026-11-01"
         },
         "framework": {
             "target_product": "Analogue Pocket",
