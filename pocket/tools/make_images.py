@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 """Make the Pocket's two graphics for this core, in APF's raw format.
 
-  dist/Cores/frazilpop.Cave 68000/icon.bin   36 x 36, "C6"
+  dist/Cores/frazilpop.Cave 68000/icon.bin   36 x 36, kept in the repo; "C6" only if there is none yet
   dist/Platforms/_images/cave68000.bin   521 x 165, from art/cave68000-banner.png
                                            (drawn from the game's logo)
 
@@ -163,11 +163,14 @@ def save(canvas, path):
 
 
 def main():
-    # Core icon: 36 x 36, drawn at the 2x2 pixel scale Analogue recommends.
-    icon = blank(36, 36)
-    s, sc = ICON_TEXT, 2
-    draw_text(icon, s, (36 - text_width(s, sc)) // 2, (36 - 7 * sc) // 2, sc)
-    save(icon, os.path.join(DIST, "Cores", CORE, "icon.bin"))
+    # Core icon: kept in the repo. Letters at Analogue's 2x2 pixel scale only
+    # until it is.
+    icon_bin = os.path.join(DIST, "Cores", CORE, "icon.bin")
+    if not os.path.exists(icon_bin):
+        icon = blank(36, 36)
+        s, sc = ICON_TEXT, 2
+        draw_text(icon, s, (36 - text_width(s, sc)) // 2, (36 - 7 * sc) // 2, sc)
+        save(icon, icon_bin)
 
     # Platform image: 521 x 165, the banner art when it is there.
     W, H = 521, 165
