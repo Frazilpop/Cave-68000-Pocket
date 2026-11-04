@@ -19,7 +19,14 @@ You can also give a list of ROM ids separated by commas, e.g.
 The core supports the following ROM ids: `donpachi`, `donpachij`,
 `donpachijs`, `donpachikr`, `donpachihk`, `ddonpach`, `ddonpachj`, `esprade`,
 `espradej`, `espradejo`, `feversos`, `dfeveron`, `uopoko`, `uopokoj`,
-`guwange`, `guwanges`, `gaia`, `theroes` and `theroesa`.
+`guwange`, `guwanges`, `gaia`, `theroes` and `theroesa`; Air Gallet's
+`agallet`, `agalletu`, `agalletj`, `agalletk`, `agallett`, `agalleth` and
+the older `agalleta`, `agalletau`, `agalletaj`, `agalletak`, `agalletat`,
+`agalletah`; and Sailor Moon's `sailormn`, `sailormne`, `sailormnu`,
+`sailormnk`, `sailormnt`, `sailormnh`, `sailormnnj`, `sailormnne`,
+`sailormnnu`, `sailormnnk`, `sailormnnt`, `sailormnnh`, `sailormnoj`,
+`sailormnoe`, `sailormnou`, `sailormnok`, `sailormnot` and `sailormnoh`.
+Within each of their versions the sets differ only in the factory EEPROM.
 
 Each image holds the game's regions packed one after another, in the order
 the MiSTer core's MRAs put them – program, EEPROM, samples, layer 0, layer 1,
@@ -29,7 +36,12 @@ EEPROM, uopoko has one layer, feversos two) simply skips it. DonPachi's
 image holds its two OKI chips' samples in place of the YMZ280B's: the
 second chip's 3 MB as MAME has them, then its last 1 MB again, because the
 NMK112 banks it in 64 pages of 64 KB and MAME folds pages 48–63 onto
-32–47. `--layout` prints each set's layout.
+32–47. Air Gallet's and Sailor Moon's images hold MAME's whole 4 MB
+program region (Sailor Moon's data ROM at 0x200000), then the EEPROM, the
+sound board's Z80 ROM and its two OKIs' samples, then the layers and
+sprites; Sailor Moon's third layer is unpacked from MAME's 4 + 2 bit halves
+into the 8 bpp tiles the layer processor reads, and its sprites are
+decrypted as MAME does at start-up. `--layout` prints each set's layout.
 
 Bytes are in the order the board reads them: the program as MAME's region
 (even byte = the high byte of the 68000's word), the EEPROM, samples and
@@ -71,7 +83,13 @@ other versions' in `_alternatives/` there), points at that file and tells the
 board which game it is. The Pocket loads the file at bridge address 0, and byte *n* of the
 file ends up at SDRAM byte *n*. DonPachi's five instance JSONs also pick
 the second bitstream, `donpachi.rbf_r`, which has its two OKI M6295s and the
-NMK112 in place of the YMZ280B.
+NMK112 in place of the YMZ280B, and Air Gallet's and Sailor Moon's pick the
+third, `agallet.rbf_r`, with their Z80 sound board (TV80, a YM2151 and two
+OKIs) and the 68000's work RAM in the Pocket's SRAM.
+
+Every bitstream also reads `Assets/analogizer/common/analogizer.bin`, the
+Analogizer's shared settings file, if it is there (a data slot at bridge
+address 0xF7000000, through core.json's second platform id, `analogizer`).
 
 The EEPROM games keep their settings in a `.sav` per set on the card: the
 93C46's 128 bytes, big-endian, as the zip's EEPROM file has them (MAME's
@@ -187,12 +205,15 @@ chip drew (`LOAD_OUT=`, `FRAMES=`), for sizing the memory traffic.
 sim/ddonpach/build.sh                 # build/obj_ddonpach/tb_ddonpach
 sim/ddonpach/build.sh --pocket        # build/obj_pocket/tb_pocket, on the Pocket's memories
 sim/ddonpach/build.sh --oki           # DonPachi's board, build/obj_donpachi/tb_ddonpach
+sim/ddonpach/build.sh --z80           # Air Gallet's and Sailor Moon's, build/obj_z80/tb_ddonpach
+sim/ddonpach/build.sh --anz           # with the Analogizer, build/obj_anz/tb_ddonpach
 build/obj_ddonpach/tb_ddonpach build/pocket/ddonpach.rom 1 3600 build/sim/ddonpach 600,1800,3000
 ```
 
 Run it from the repository root (fx68k loads its microcode from there). The
 arguments are the image, the game id (0 feversos and dfeveron, 1 ddonpach,
-2 donpachi, 3 esprade, 4 uopoko, 5 guwange, 6 gaia and theroes), the frames
+2 donpachi, 3 esprade, 4 uopoko, 5 guwange, 6 gaia and theroes, 9 agallet,
+10 sailormn), the frames
 to run, where to write, and the frames to save as `frame_NNNNN.ppm`.
 `stats.csv` gets a line a frame. `--trace` writes the bus in the Lua
 script's format, `--press` takes inputs as above (with `Pause`, the
@@ -238,6 +259,68 @@ board's `SoundOki` and writes each chip's samples in the model's format, so
 `tb_ddonpach --oki-log` and `--oki-samples` (built with `--oki`) do the same
 for a run of the game. `sh pocket/build.sh --oki` builds DonPachi's
 bitstream.
+
+Air Gallet's and Sailor Moon's sound board has its own oracle, which logs
+what the Z80 does on its I/O ports (and with `Z80_MEM=1` its memory), and
+what the 68000 tells it:
+
+```sh
+tools/pocket/mame_oracle.sh tools/mame_cave_z80.lua agallet \
+    Z80_OUT=build/mame/z80/agallet.txt Z80_FRAMES=3000 -- -sound none
+sim/z80/build.sh
+build/obj_z80snd/tb_z80 build/mame/z80/agallet.txt build/pocket/agallet.rom --out build/sim/z80/agallet
+python3 -I tools/pocket/diff_z80_log.py build/mame/z80/agallet.txt board.txt
+python3 -I tools/pocket/cmp_samples.py a.raw b.raw --type i16 --channels 2
+```
+
+`sim/z80`'s `tb_z80` runs the board's sound board on its own
+(`rtl/cave/SoundZ80.sv`), fed the 68000's commands from the log on their
+clock, and holds every Z80 access to MAME's, with the clock it was made on.
+`--log` writes its own accesses in the log's format and `--out` each chip's
+samples. On the whole board, `tb_ddonpach --z80-log` (built with `--z80`)
+writes the same log for a run of the game, and `diff_z80_log.py` compares
+two logs access for access (`--kinds` picks the Z80's ports, its memory or
+the 68000's side). `oki_model.py --z80` plays the log's OKI commands through
+MAME's chips, and `cmp_samples.py` compares two sample files over the length
+they share.
+
+The YM2151 has benches of its own:
+
+```sh
+sim/ym2151/build.sh
+build/obj_ym2151/tb_ym2151 build/mame/z80/agallet.txt --out build/sim/ym2151/agallet
+python3 -I sim/ym2151/fuzz.py build/sim/ym2151/fuzz.txt --seed 1 --seconds 20
+```
+
+`tb_ym2151` plays the log's register writes through the board's chip
+(`rtl/cave/YM2151.sv`) and through MAME's own (ymfm, compiled in from the
+MAME checkout), sample for sample, and checks the status reads MAME's Z80
+made. `fuzz.py` writes random register logs that play every part of the
+chip the two games' music leaves out. `sim/ym2151/build.sh jt51` builds the
+same bench on jt51, the chip first tried, for comparison.
+
+### The Analogizer
+
+```sh
+sim/ddonpach/build.sh --anz
+python3 tools/pocket/check_analogizer.py                         # ddonpach's f05400
+python3 tools/pocket/check_analogizer.py gaia build/mame/dump/gaia 2000 --out build/anz_gaia
+```
+
+`--anz` builds the harness with the shell's `pocket_analogizer` and
+RndMnkIII's module on the board's raster, and the harness then reads the
+cartridge pins as the adapter's DAC would. `--anz-file` writes an
+`analogizer.bin` to the core as the Pocket's bridge does, `--anz-raw` saves
+the pins at every clock beside each saved frame, `--anz-pad snes|nes|db15`
+puts two pads of that kind on the SNAC port and presses each button in turn,
+and `--anz-cont` sets the Pocket's own controls. `check_analogizer.py` makes
+a file for each setting as AnalogizerConfigurator does and runs them all
+(31 runs) on a replayed MAME dump: RGBS and RGsB against the board's frame on
+every clock, YPbPr and Y/C against the arithmetic of their encoders (with the
+colour burst's frequency and place), the scandoubler's lines and scanlines,
+the Pocket's screen off, the pins held as the template leaves them with no
+file or the Analogizer off, and every pad button under every SNAC
+assignment. It uses numpy and Pillow.
 
 ### The 48 kHz resampler
 
