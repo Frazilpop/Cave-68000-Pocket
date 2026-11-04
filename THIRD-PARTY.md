@@ -11,7 +11,8 @@ These land in `third_party/`, pinned in `deps.lock`, and are never committed.
 |---|---|---|
 | [jtfpga/fx68k](https://github.com/jtfpga/fx68k) | GPL-3.0-only | The 68000 main CPU |
 | [agg23/analogue-pocket-utils](https://github.com/agg23/analogue-pocket-utils) | MIT | Pocket shell IP: data loader, I2S audio, sync FIFO |
-| [mamedev/mame](https://github.com/mamedev/mame) (a sparse checkout) | BSD-3-Clause (the Cave files) | The reference |
+| [mamedev/mame](https://github.com/mamedev/mame) (a sparse checkout) | BSD-3-Clause (the Cave files, ymfm) | The reference |
+| [jotego/jt51](https://github.com/jotego/jt51) | GPL-3.0-or-later | Only `sim/ym2151`'s `tb_jt51`, which holds it against ymfm; nothing that ships uses it |
 
 ### fx68k – GPL-3.0-only
 `deps.lock` pins `jtfpga/fx68k`, which is ijor's code repackaged for jtframe –
@@ -29,8 +30,12 @@ The Cave driver in `src/mame/atlus/` – `cave.cpp` (the boards, clocks,
 memory maps, inputs and ROM sets), `cave_v.cpp` and `sprite013` – is
 BSD-3-Clause, © Luca Elia, and so are `src/devices/video/tmap038` (© Luca
 Elia, Paul Priest, David Haywood) and `src/devices/sound/ymz280b.cpp` (©
-Aaron Giles). They are the only public documentation of these chips, and
-nothing from them is copied into the HDL. `tools/pocket/build_rom.py` lists
+Aaron Giles). For Air Gallet and Sailor Moon's sound board, the
+`cave_z80_state` parts of `cave.cpp`, `src/devices/sound/okim6295.cpp` and
+`okiadpcm.cpp`, `src/devices/sound/ymopm.*` and `3rdparty/ymfm` (Aaron
+Giles), which `sim/ym2151` compiles in as its reference, are BSD-3-Clause
+too. They are the only public documentation of these chips, and nothing
+from them is copied into the HDL except ymfm's tables (below). `tools/pocket/build_rom.py` lists
 each set's chips, CRCs and sizes as `cave.cpp`'s `ROM_START` blocks give
 them.
 
@@ -61,14 +66,40 @@ the Pocket. The controller follows meathax's System 32 controller (GPL-3.0)
 `verify_rom.py` and `diff_cave_trace.py` grew from that core's tools and
 carry its notice too.
 
+### TV80 – MIT
+`rtl/tv80/` is Guy Hutchison's TV80 (© 2004 Guy Hutchison), based on Daniel
+Wallner's T80, from hutch31/tv80 at `66a131c`: the Z80 of Air Gallet and
+Sailor Moon's sound board. It is kept in the tree with two changes, each
+described in `tv80_core.v`: MAME's power-on registers, and the NMI answered
+in 11 T-states, as a Z80 does. Keep the notice.
+
 ### Ports of MAME's sound chips – BSD-3-Clause
+The YM2151 of Air Gallet and Sailor Moon's sound board, `rtl/cave/YM2151.sv`,
+is written for this core to ymfm's model of the chip, and its sine, power,
+phase step, envelope and detune tables are ymfm's (© 2021 Aaron Giles,
+BSD-3-Clause). The notice is in the file's header, and goes with the core in
+binary form as well.
+
 The references the sound is checked against keep MAME's licence:
 
 - `sim/ymz280b/ymz280b_mame.h` is a port of MAME's `ymz280b.cpp` (Aaron
   Giles), cut to what this board uses.
 - `tools/pocket/oki_model.py` is a port of MAME's `okim6295.cpp`,
   `okiadpcm.cpp` and `nmk112.cpp` (Mirko Buffoni, Aaron Giles, Andrew
-  Gardner, Alex W. Jackson), cut to what DonPachi uses.
+  Gardner, Alex W. Jackson), cut to what DonPachi uses; its `--z80` mode
+  plays Air Gallet and Sailor Moon's two OKIs the same way.
+
+### RndMnkIII's Analogizer module – MIT, with GPL parts
+`pocket/src/fpga/analogizer/` is the adapter module of RndMnkIII's
+[Analogizer](https://github.com/RndMnkIII/Analogizer) (`analogizer/` at
+`4b35f83`, © 2024 RndMnkIII, MIT), only the files it uses, as
+`analogizer.qip` lists them. Three of them carry their own licences:
+`yc_out.sv` (Mike Simone, GPL-2.0-or-later), `scandoubler.v` (Till Harbaum,
+from MiST, GPL-3.0-or-later) and `vga_out_sw.v` (MiSTer's `vga_out`, by
+Sorgelig, GPL). Two changes are made, marked in the files: the
+scandoubler's pixel clock divider set for this board, and the PlayStation
+pad reader left out – its `dualshock_controller.v` is free for
+non-commercial use only, which the GPL does not allow.
 
 ### Analogue openFPGA core template – Analogue's APF Software License Agreement
 `pocket/src/fpga/apf/`, `core_bridge_cmd.v` and the Quartus project files are
@@ -83,8 +114,10 @@ License), trimmed by Analogue.
 
 Everything else under `rtl/`, `sim/`, `tools/` and `pocket/` – the board's
 top level and its Pocket memory adapters, DonPachi's sound
-(`rtl/cave/SoundOki.sv`), the Pocket shell, the simulation harnesses and the
-tools – is GPL-3.0-or-later, as each file's header says (the combination is
+(`rtl/cave/SoundOki.sv`), Air Gallet and Sailor Moon's sound board
+(`rtl/cave/SoundZ80.sv`, with the YM2151 above), the Pocket shell and its
+Analogizer wrapper (`pocket_analogizer.sv`), the simulation harnesses and
+the tools – is GPL-3.0-or-later, as each file's header says (the combination is
 GPL-3.0-only).
 
 `pocket/art/cave68000-banner.png`, the platform image, is made from the
